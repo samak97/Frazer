@@ -1,7 +1,11 @@
 import { create } from 'zustand';
 import {
+  EqSetting,
+  getAppConfig,
   getHeadsetSettings,
   HeadsetSettings,
+  onHeadsetSettingsChanged,
+  setButtonCycle,
   setHeadsetAutoOff,
   setHeadsetEq,
   setHeadsetMicEqPreset,
@@ -69,6 +73,14 @@ export const MIC_EQ_PRESETS = [
   { name: 'Conference', index: 3 },
 ];
 
+/** Everything the headset's EQ button can step through, as the backend stores it. */
+export const CYCLE_CHOICES: EqSetting[] = [
+  ...RECOMMENDED_EQ.map((r) => ({ name: r.name, preset: CUSTOM_EQ_INDEX, bands: r.bands })),
+  ...EQ_PRESETS.map((p) => ({ name: p.name, preset: p.index, bands: p.bands })),
+];
+const DEFAULT_CYCLE = ['Reference', 'Bass Music', 'Balanced Music', 'Game'];
+const CYCLE_SEEDED_KEY = 'frazer.cycleSeeded';
+
 const EQ_DEBOUNCE_MS = 150;
 let eqTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -76,8 +88,12 @@ interface HeadsetState {
   settings: HeadsetSettings | null;
   loading: boolean;
   error: string | null;
-  loadSettings: () => Promise<void>;
-  applyEq: (preset: number, bands: number[]) => void;
+  /** Names of the presets the EQ button cycles through, in order. */
+  buttonCycle: string[];
+  loadSettings: (quiet?: boolean) => Promise<void>;
+  loadConfig: () => Promise<void>;
+  toggleCycleEntry: (name: string) => Promise<void>;
+  applyEq: (preset: number, bands: number[], name?: string) => void;
   setSidetone: (enabled: boolean, level: number) => Promise<void>;
   setMicMute: (muted: boolean) => Promise<void>;
   setMicEqPreset: (preset: number) => Promise<void>;
@@ -96,29 +112,56 @@ export const useHeadsetStore = create<HeadsetState>((set, get) => {
     }
   };
 
+  const saveCycle = async (names: string[]) => {
+    set({ buttonCycle: names });
+    await setButtonCycle(names.map((n) => CYCLE_CHOICES.find((c) => c.name === n)!).filter(Boolean));
+  };
+
   return {
     settings: null,
     loading: false,
     error: null,
+    buttonCycle: [],
 
-    loadSettings: async () => {
-      set({ loading: true });
+    /** `quiet` refreshes in place (no loading state), for updates pushed by the headset. */
+    loadSettings: async (quiet = false) => {
+      if (!quiet) set({ loading: true });
       try {
         set({ settings: await getHeadsetSettings(), error: null });
       } catch (e) {
-        set({ settings: null, error: String(e) });
+        if (!quiet) set({ settings: null, error: String(e) });
       } finally {
-        set({ loading: false });
+        if (!quiet) set({ loading: false });
       }
     },
 
-    applyEq: (preset, bands) => {
+    loadConfig: async () => {
+      const config = await getAppConfig();
+      let names = config.button_cycle.map((c) => c.name).filter((n): n is string => !!n);
+      // First run: give the EQ button a sensible cycle instead of the firmware's.
+      if (names.length === 0 && !localStorage.getItem(CYCLE_SEEDED_KEY)) {
+        localStorage.setItem(CYCLE_SEEDED_KEY, '1');
+        names = DEFAULT_CYCLE;
+        await saveCycle(names);
+      }
+      set({ buttonCycle: names });
+    },
+
+    toggleCycleEntry: async (name) => {
+      const current = get().buttonCycle;
+      const next = current.includes(name)
+        ? current.filter((n) => n !== name)
+        : CYCLE_CHOICES.map((c) => c.name!).filter((n) => n === name || current.includes(n));
+      await saveCycle(next);
+    },
+
+    applyEq: (preset, bands, name) => {
       set((s) => ({
         settings: s.settings ? { ...s.settings, eq_enabled: true, eq_preset: preset, eq_bands: bands } : s.settings,
       }));
       clearTimeout(eqTimer);
       const clamped = bands.map((b) => Math.min(EQ_MAX_DB, Math.max(EQ_MIN_DB, Math.round(b))));
-      eqTimer = setTimeout(() => write({}, () => setHeadsetEq(preset, clamped)), EQ_DEBOUNCE_MS);
+      eqTimer = setTimeout(() => write({}, () => setHeadsetEq(preset, clamped, name ?? null)), EQ_DEBOUNCE_MS);
     },
 
     setSidetone: (enabled, level) =>
@@ -128,3 +171,5 @@ export const useHeadsetStore = create<HeadsetState>((set, get) => {
     setAutoOff: (minutes) => write({ auto_off_minutes: minutes }, () => setHeadsetAutoOff(minutes)),
   };
 });
+
+onHeadsetSettingsChanged(() => useHeadsetStore.getState().loadSettings(true));

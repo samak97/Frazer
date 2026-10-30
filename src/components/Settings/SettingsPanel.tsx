@@ -3,6 +3,7 @@ import { Power, Info, Rocket } from 'lucide-react';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { useHeadsetStore } from '../../stores/headsetStore';
 import { Toggle } from '../common/Toggle';
+import { Card, CardTitle, Page } from '../common/Page';
 
 const AUTO_OFF_OPTIONS = [
   { label: 'Never', minutes: 0 },
@@ -15,74 +16,62 @@ const AUTO_OFF_OPTIONS = [
 export const SettingsPanel = () => {
   const { settings, loadSettings, setAutoOff } = useHeadsetStore();
   const [autostart, setAutostart] = useState(false);
+  const [autostartError, setAutostartError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadSettings();
+    loadSettings(true);
     isEnabled().then(setAutostart).catch(() => {});
   }, [loadSettings]);
 
   const toggleAutostart = async (on: boolean) => {
-    await (on ? enable() : disable());
+    try {
+      await (on ? enable() : disable());
+      setAutostartError(null);
+    } catch (e) {
+      setAutostartError(String(e));
+    }
     setAutostart(await isEnabled());
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div>
-        <h2 className="text-3xl font-bold tracking-tight">Settings</h2>
-        <p className="text-text-dim mt-1">Headset power and app preferences.</p>
-      </div>
+    <Page title="Settings" subtitle="Headset power and how Frazer runs.">
+      <Card>
+        <CardTitle
+          icon={Rocket}
+          title="Start with Windows"
+          hint="Starts quietly in the tray when you sign in, so the EQ button and reconnect restore keep working."
+          right={<Toggle checked={autostart} onChange={toggleAutostart} label="Start with Windows" />}
+        />
+        <p className="text-xs text-fg-dim">
+          Closing the window keeps Frazer running in the tray. Right-click the tray icon and choose Quit to exit.
+        </p>
+        {autostartError && <p className="text-xs text-coral mt-2">{autostartError}</p>}
+      </Card>
 
       {settings && (
-        <div className="premium-card glass p-8 space-y-6">
-          <div className="flex items-center gap-4">
-            <Power className="text-accent-primary" />
-            <div>
-              <h3 className="text-xl font-bold">Auto power-off</h3>
-              <p className="text-sm text-text-dim">Turns the headset off after this long without audio.</p>
-            </div>
-          </div>
+        <Card>
+          <CardTitle icon={Power} title="Auto power-off" hint="Turns the headset off after this long without audio." />
           <div className="flex gap-2 flex-wrap">
             {AUTO_OFF_OPTIONS.map((o) => (
-              <button
-                key={o.minutes}
-                onClick={() => setAutoOff(o.minutes)}
-                className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all ${
-                  settings.auto_off_minutes === o.minutes
-                    ? 'bg-white/10 text-white border border-white/20'
-                    : 'text-text-dim hover:text-text-primary hover:bg-white/5'
-                }`}
-              >
+              <button key={o.minutes} onClick={() => setAutoOff(o.minutes)} className={`chip ${settings.auto_off_minutes === o.minutes ? 'chip-active' : 'chip-idle'}`}>
                 {o.label}
               </button>
             ))}
           </div>
-        </div>
+        </Card>
       )}
-
-      <div className="premium-card glass p-8 flex items-center gap-4">
-        <Rocket className="text-accent-primary" />
-        <div className="flex-1">
-          <h3 className="text-xl font-bold">Start with Windows</h3>
-          <p className="text-sm text-text-dim">Launch Frazer minimised when you sign in.</p>
-        </div>
-        <Toggle checked={autostart} onChange={toggleAutostart} label="Start with Windows" />
-      </div>
 
       {settings && (
-        <div className="premium-card glass p-8">
-          <div className="flex items-center gap-4 mb-4">
-            <Info className="text-accent-primary" />
-            <h3 className="text-xl font-bold">Device info</h3>
-          </div>
+        <Card>
+          <CardTitle icon={Info} title="Device info" />
           <dl className="grid grid-cols-[140px_1fr] gap-y-2 text-sm">
-            <dt className="text-text-dim">Firmware</dt>
+            <dt className="text-fg-dim">Firmware</dt>
             <dd className="font-mono">{settings.firmware ?? '—'}</dd>
-            <dt className="text-text-dim">Serial</dt>
+            <dt className="text-fg-dim">Serial</dt>
             <dd className="font-mono">{settings.serial ?? '—'}</dd>
           </dl>
-        </div>
+        </Card>
       )}
-    </div>
+    </Page>
   );
 };

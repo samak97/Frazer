@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Mic, MicOff, Ear } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Mic, MicOff, Ear, AudioLines } from 'lucide-react';
 import { MIC_EQ_PRESETS, useHeadsetStore } from '../../stores/headsetStore';
 import { DeviceNotice } from '../common/DeviceNotice';
 import { Toggle } from '../common/Toggle';
+import { Card, CardTitle, Page, item } from '../common/Page';
 
 export const MicrophonePanel = () => {
   const { settings, loadSettings, setSidetone, setMicMute, setMicEqPreset } = useHeadsetStore();
@@ -24,31 +26,36 @@ export const MicrophonePanel = () => {
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div>
-        <h2 className="text-3xl font-bold tracking-tight">Microphone</h2>
-        <p className="text-text-dim mt-1">Mute, sidetone and mic EQ, applied directly on the headset.</p>
-      </div>
-
-      <div className="premium-card glass p-8 flex items-center gap-6">
-        {muted ? <MicOff className="text-error" /> : <Mic className="text-accent-primary" />}
+    <Page title="Microphone" subtitle="Mute, sidetone and voice EQ, applied on the headset itself.">
+      <motion.button
+        variants={item}
+        whileTap={{ scale: 0.985 }}
+        onClick={() => setMicMute(!muted)}
+        className={`surface w-full p-6 flex items-center gap-5 text-left transition-colors ${muted ? '!border-coral/40' : ''}`}
+      >
+        <div className="relative w-16 h-16 flex items-center justify-center">
+          {!muted && <span className="absolute inset-0 rounded-2xl bg-mint/20 animate-ping [animation-duration:2.4s]" />}
+          <div className={`relative w-16 h-16 rounded-2xl flex items-center justify-center ${muted ? 'bg-coral/15 text-coral' : 'accent-gradient text-ink-950'}`}>
+            {muted ? <MicOff size={28} /> : <Mic size={28} />}
+          </div>
+        </div>
         <div className="flex-1">
-          <h3 className="text-xl font-bold">Mic {muted ? 'muted' : 'live'}</h3>
-          <p className="text-sm text-text-dim">Same as the mute button on the headset.</p>
+          <p className="text-xl font-semibold">{muted ? 'Mic muted' : 'Mic live'}</p>
+          <p className="text-sm text-fg-muted mt-1">Click to {muted ? 'unmute' : 'mute'}. Same as the mute button on the headset.</p>
         </div>
-        <Toggle checked={!muted} onChange={(on) => setMicMute(!on)} label="Microphone enabled" />
-      </div>
+      </motion.button>
 
-      <div className="premium-card glass p-8 space-y-6">
-        <div className="flex items-center gap-4">
-          <Ear className="text-accent-primary" />
-          <h3 className="text-xl font-bold flex-1">Sidetone</h3>
-          <Toggle checked={sidetoneOn} onChange={(on) => setSidetone(on, sidetoneLevel)} label="Sidetone enabled" />
-        </div>
-        <div className={sidetoneOn ? '' : 'opacity-40 pointer-events-none'}>
-          <div className="flex justify-between text-sm font-bold text-text-dim uppercase tracking-tight mb-2">
+      <Card>
+        <CardTitle
+          icon={Ear}
+          title="Sidetone"
+          hint="Hear your own voice so you don't end up shouting."
+          right={<Toggle checked={sidetoneOn} onChange={(on) => setSidetone(on, sidetoneLevel)} label="Sidetone enabled" />}
+        />
+        <motion.div animate={{ opacity: sidetoneOn ? 1 : 0.35 }} className={sidetoneOn ? '' : 'pointer-events-none'}>
+          <div className="flex justify-between text-xs text-fg-dim uppercase tracking-wider mb-2">
             <span>Volume</span>
-            <span>{sidetoneLevel}%</span>
+            <span className="font-mono text-fg-muted">{sidetoneLevel}%</span>
           </div>
           <input
             type="range"
@@ -58,32 +65,22 @@ export const MicrophonePanel = () => {
             onChange={(e) => setLevel(parseInt(e.target.value, 10))}
             onPointerUp={commitLevel}
             onKeyUp={commitLevel}
-            className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-accent-primary"
+            className="slider"
+            style={{ ['--fill' as string]: `${sidetoneLevel}%` }}
           />
-        </div>
-        <p className="text-sm text-text-dim leading-relaxed max-w-2xl">
-          Sidetone lets you hear your own voice through the headset, so you don't end up shouting.
-        </p>
-      </div>
+        </motion.div>
+      </Card>
 
-      <div className="premium-card glass p-8">
-        <h3 className="text-xl font-bold mb-6">Mic EQ</h3>
+      <Card>
+        <CardTitle icon={AudioLines} title="Voice EQ" hint="Shapes how your mic sounds to others." />
         <div className="flex gap-2 flex-wrap">
           {MIC_EQ_PRESETS.map((p) => (
-            <button
-              key={p.index}
-              onClick={() => setMicEqPreset(p.index)}
-              className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all ${
-                settings.mic_eq_preset === p.index
-                  ? 'bg-white/10 text-white border border-white/20'
-                  : 'text-text-dim hover:text-text-primary hover:bg-white/5'
-              }`}
-            >
+            <button key={p.index} onClick={() => setMicEqPreset(p.index)} className={`chip ${settings.mic_eq_preset === p.index ? 'chip-active' : 'chip-idle'}`}>
               {p.name}
             </button>
           ))}
         </div>
-      </div>
-    </div>
+      </Card>
+    </Page>
   );
 };

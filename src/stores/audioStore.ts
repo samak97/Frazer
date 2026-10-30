@@ -1,52 +1,38 @@
 import { create } from 'zustand';
-import { 
-  getConnectedHeadsets, 
-  onDeviceChange, 
-  HeadsetInfo 
+import {
+  getConnectedHeadsets,
+  onDeviceChange,
+  HeadsetInfo
 } from '../utils/tauri-bridge';
 import { invoke } from "@tauri-apps/api/core";
 
-export interface AudioDevice {
+/** One mixer row: every audio session of one app. */
+export interface AudioSession {
   id: string;
   name: string;
-  is_default: boolean;
-}
-
-export interface AudioSession {
-  name: string;
+  /** PNG data URL, when the app's icon could be extracted. */
+  icon: string | null;
   volume: number;
   is_muted: boolean;
-  process_id: number;
+  process_ids: number[];
 }
 
 interface AudioState {
-  devices: AudioDevice[];
   sessions: AudioSession[];
   headsets: HeadsetInfo[];
-  isLoading: boolean;
-  
-  fetchDevices: () => Promise<void>;
+  headsetsLoaded: boolean;
+
   fetchSessions: () => Promise<void>;
   fetchHeadsets: () => Promise<void>;
-  updateSessionVolume: (pid: number, volume: number) => Promise<void>;
-  toggleSessionMute: (pid: number, currentMute: boolean) => Promise<void>;
+  updateSessionVolume: (id: string, volume: number) => Promise<void>;
+  toggleSessionMute: (id: string) => Promise<void>;
   toggleMasterMute: () => Promise<void>;
 }
 
-export const useAudioStore = create<AudioState>((set) => ({
-  devices: [],
+export const useAudioStore = create<AudioState>((set, get) => ({
   sessions: [],
   headsets: [],
-  isLoading: false,
-
-  fetchDevices: async () => {
-    try {
-      const devices = await invoke<AudioDevice[]>("list_audio_devices");
-      set({ devices });
-    } catch (error) {
-      console.error("Failed to fetch devices:", error);
-    }
-  },
+  headsetsLoaded: false,
 
   fetchSessions: async () => {
     try {
@@ -59,32 +45,27 @@ export const useAudioStore = create<AudioState>((set) => ({
 
   fetchHeadsets: async () => {
     const headsets = await getConnectedHeadsets();
-    set({ headsets });
+    set({ headsets, headsetsLoaded: true });
   },
 
-  updateSessionVolume: async (pid: number, volume: number) => {
+  updateSessionVolume: async (id, volume) => {
+    const session = get().sessions.find((s) => s.id === id);
+    if (!session) return;
+    set((state) => ({ sessions: state.sessions.map((s) => (s.id === id ? { ...s, volume } : s)) }));
     try {
-      await invoke("update_session_volume", { pid, volume });
-      // Optimistic update
-      set((state) => ({
-        sessions: state.sessions.map((s) => 
-          s.process_id === pid ? { ...s, volume } : s
-        ),
-      }));
+      await invoke("update_session_volume", { pids: session.process_ids, volume });
     } catch (error) {
       console.error("Failed to update volume:", error);
     }
   },
 
-  toggleSessionMute: async (pid: number, currentMute: boolean) => {
+  toggleSessionMute: async (id) => {
+    const session = get().sessions.find((s) => s.id === id);
+    if (!session) return;
+    const mute = !session.is_muted;
+    set((state) => ({ sessions: state.sessions.map((s) => (s.id === id ? { ...s, is_muted: mute } : s)) }));
     try {
-      const newMute = !currentMute;
-      await invoke("set_session_mute_state", { pid, mute: newMute });
-      set((state) => ({
-        sessions: state.sessions.map((s) => 
-          s.process_id === pid ? { ...s, is_muted: newMute } : s
-        ),
-      }));
+      await invoke("set_session_mute_state", { pids: session.process_ids, mute });
     } catch (error) {
       console.error("Failed to toggle session mute:", error);
     }
@@ -99,7 +80,6 @@ export const useAudioStore = create<AudioState>((set) => ({
   },
 }));
 
-// Initialize listeners
 onDeviceChange((headsets) => {
-  useAudioStore.setState({ headsets });
+  useAudioStore.setState({ headsets, headsetsLoaded: true });
 });

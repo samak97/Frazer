@@ -101,5 +101,28 @@ setPresetEQIndex(idx) --> setSpeakerPresetEQGroup(1 standard | 2 esports) --> se
 - **Fixed slots:** Game, Music and Movie (7/8/9) are curves built into the firmware. Only the esports slots and Custom (250–255, `useEqualizerOBM`) take band data.
 - **Hardware EQ flag:** while THX Spatial is on, Synapse switches the hardware EQ off (`9E 00 01 00`) and applies the EQ in software through its THX audio driver. It switches it back on (`…01`) only when THX is off or when Synapse shuts down. If that flag is off, band writes are stored but nothing changes audibly.
 
+## Events (headset → host)
+
+The headset sends unsolicited input reports on the same channel and with the same `"PI"` framing (Synapse's `rzHardwareEventsAudioMxicParser`). A sub-frame is an event when `data[1] == 0x02`. `data[0]` is the record ID and the value starts at `data[3]`.
+
+| Record | Meaning | Value |
+|---|---|---|
+| `0x13` | EQ slot changed (headset EQ button) | new slot (7/8/9/255…) |
+| `0x18` | Sidetone toggled | 0/1 |
+| `0x1D` / `0x1E` | EQ group / hardware EQ flag changed | |
+| `0x20` | Headset power / wireless link | 0 off, 1 connected |
+| `0x21` | Battery | % |
+| `0x27` | Do not disturb | 0/1 |
+| `0x2A` | Charging | 0 no, 1 yes, 2 error |
+| `0x55` | Mic mute button | 1 = muted |
+
+```
+press EQ button --> firmware moves to its next slot --> event 0x13 --> host (Synapse or Frazer) reacts
+```
+
+Seen on hardware: pressing the button while on Custom (255) reports slot 7 (Game). Host writes did not produce `0x13` events with the slot the host set.
+
+Each Windows HID handle gets its own copy of input reports. So Frazer reads events on a second handle, and drains stale reports on the command handle before each command.
+
 ## Not yet confirmed on hardware
 - **Status byte position:** whether the GET_REPORT status byte `0x4F` lands at `buf[0]` or `buf[1]` once hidapi includes the report ID. The transport accepts either.

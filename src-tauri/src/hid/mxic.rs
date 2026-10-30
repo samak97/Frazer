@@ -95,6 +95,26 @@ pub fn find_reply(report: &[u8], expected: &[u8]) -> Option<Vec<u8>> {
         .map(|d| d[expected.len()..].to_vec())
 }
 
+/// Unsolicited notifications in an input report, as `(record id, payload)`. The headset sends
+/// these on its own (EQ button, power, battery, mic button); they share the "PI" framing with
+/// replies but carry `0x02` instead of `0x01` in the second data byte.
+pub fn parse_events(report: &[u8]) -> Vec<(u8, Vec<u8>)> {
+    parse_frames(report)
+        .into_iter()
+        .filter(|d| d.len() >= 3 && d[1] == 2)
+        .map(|d| (d[0], d[3..].to_vec()))
+        .collect()
+}
+
+pub mod event {
+    pub const PRESET_EQ_INDEX: u8 = 0x13;
+    pub const SIDETONE: u8 = 0x18;
+    pub const WIRELESS: u8 = 0x20;
+    pub const BATTERY: u8 = 0x21;
+    pub const CHARGING: u8 = 0x2A;
+    pub const MIC: u8 = 0x55;
+}
+
 /// The three HID operations the protocol needs; implemented by hidapi and by test fakes.
 pub trait HidIo: Send {
     fn write(&mut self, buf: &[u8]) -> Result<usize, String>;
@@ -136,6 +156,7 @@ impl<I: HidIo> MxicClient<I> {
     }
 
     fn transact(&mut self, report: &[u8; REPORT_LEN], expect: Option<&[u8]>) -> Result<Vec<u8>, String> {
+        self.drain_pending()?;
         let mut last_err = String::from("no attempt made");
         for attempt in 0..MAX_WRITES {
             if self.io.write(report)? != REPORT_LEN {
@@ -156,6 +177,18 @@ impl<I: HidIo> MxicClient<I> {
             }
         }
         Err(last_err)
+    }
+
+    /// Drops input reports queued while idle (events, late replies) so they can't be read as
+    /// the answer to the next command.
+    fn drain_pending(&mut self) -> Result<(), String> {
+        let mut buf = [0u8; REPORT_LEN];
+        for _ in 0..MAX_READS {
+            if self.io.read_timeout(&mut buf, 0)? == 0 {
+                break;
+            }
+        }
+        Ok(())
     }
 
     /// The status flag sits at [0] if the report ID is stripped, [1] if it is kept.
@@ -217,7 +250,12 @@ mod tests {
             buf[1] = STATUS_OK;
             Ok(REPORT_LEN)
         }
-        fn read_timeout(&mut self, buf: &mut [u8], _: i32) -> Result<usize, String> {
+        /// Queued reports model replies arriving after the write, so the pre-command drain
+        /// (timeout 0) sees an empty queue.
+        fn read_timeout(&mut self, buf: &mut [u8], timeout_ms: i32) -> Result<usize, String> {
+            if timeout_ms == 0 {
+                return Ok(0);
+            }
             match self.reads.pop_front() {
                 Some(r) => {
                     buf[..r.len()].copy_from_slice(&r);
@@ -269,6 +307,14 @@ mod tests {
         assert_eq!(c.io.writes.len(), 2);
         assert_eq!(c.io.writes[0][10], cmd::REMOTE_SET);
         assert_eq!(&c.io.writes[1][10..13], &[0x21, 0, 0]);
+    }
+
+    #[test]
+    fn parses_notify_frames_but_not_replies() {
+        // EQ button press: record 0x13, notify flag 2, payload len 1, new slot 8
+        let notify = reply(&[event::PRESET_EQ_INDEX, 2, 1], &[8]);
+        assert_eq!(parse_events(&notify), vec![(event::PRESET_EQ_INDEX, vec![8])]);
+        assert!(parse_events(&reply(&[0x13, 1, 1], &[8])).is_empty());
     }
 
     #[test]

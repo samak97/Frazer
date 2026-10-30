@@ -45,6 +45,19 @@ pub struct Settings {
     pub serial: Option<String>,
 }
 
+/// Something the headset reported on its own (button press, power, battery…).
+#[derive(Debug, Clone, PartialEq)]
+pub enum HeadsetEvent {
+    /// The EQ button moved the headset to another preset slot.
+    EqPreset(u8),
+    /// Headset switched on/off or came into/out of range of the dongle.
+    HeadsetPower(bool),
+    Battery(u8),
+    Charging(bool),
+    MicMuted(bool),
+    Sidetone(bool),
+}
+
 pub trait HeadsetDriver: Send {
     fn name(&self) -> &str;
     fn connection(&self) -> &str;

@@ -1,92 +1,90 @@
-import React from 'react';
-import { useUIStore } from '../../stores/uiStore';
 import { motion } from 'framer-motion';
-import { 
-  Activity, 
-  SlidersHorizontal, 
-  Volume2, 
-  Mic2, 
-  Settings2, 
-  Layers, 
-} from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { Activity, SlidersHorizontal, Volume2, Mic2, Settings2, Layers, BatteryCharging, BatteryMedium } from 'lucide-react';
+import { useUIStore } from '../../stores/uiStore';
+import { useAudioStore } from '../../stores/audioStore';
 
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+const NAV = [
+  { id: 'dashboard', icon: Activity, label: 'Dashboard' },
+  { id: 'equalizer', icon: SlidersHorizontal, label: 'Equalizer' },
+  { id: 'microphone', icon: Mic2, label: 'Microphone' },
+  { id: 'mixer', icon: Volume2, label: 'Volume Mixer' },
+  { id: 'profiles', icon: Layers, label: 'Profiles' },
+  { id: 'settings', icon: Settings2, label: 'Settings' },
+];
 
-interface SidebarItemProps {
-  icon: React.ElementType;
-  label: string;
-  active?: boolean;
-  onClick: () => void;
-}
-
-const SidebarItem = ({ icon: Icon, label, active, onClick }: SidebarItemProps) => (
-  <motion.div
-    whileHover={{ x: 4 }}
-    whileTap={{ scale: 0.98 }}
-    onClick={onClick}
-    className={cn(
-      "group relative flex items-center gap-3 px-4 py-3 cursor-pointer rounded-xl transition-all duration-200",
-      active 
-        ? "bg-accent-primary text-white shadow-lg shadow-accent-primary/20" 
-        : "text-text-secondary hover:text-text-primary hover:bg-white/5"
-    )}
-  >
-    <Icon size={20} className={cn(active ? "text-white" : "text-accent-primary group-hover:scale-110 transition-transform")} />
-    <span className="font-medium text-sm">{label}</span>
-    {active && (
-      <motion.div 
-        layoutId="active-indicator"
-        className="absolute left-0 w-1 h-6 bg-white rounded-r-full"
-      />
-    )}
-  </motion.div>
-);
-
-export const Sidebar = () => {
+const NavItem = ({ id, icon: Icon, label }: (typeof NAV)[number]) => {
   const { activeTab, setActiveTab } = useUIStore();
-
-  const menuItems = [
-    { id: 'dashboard', icon: Activity, label: 'Dashboard' },
-    { id: 'equalizer', icon: SlidersHorizontal, label: 'Equalizer' },
-    { id: 'mixer', icon: Volume2, label: 'Volume Mixer' },
-    { id: 'microphone', icon: Mic2, label: 'Microphone' },
-    { id: 'profiles', icon: Layers, label: 'Profiles' },
-  ];
-
+  const active = activeTab === id;
   return (
-    <aside className="w-sidebar-width h-screen glass border-r border-border-color flex flex-col p-4 z-20 sticky top-0">
-      <div className="flex items-center gap-3 px-2 mb-10 mt-2">
-        <div className="w-10 h-10 rounded-xl bg-accent-primary flex items-center justify-center shadow-lg shadow-accent-primary/40">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-white">
-            <path d="M12 5C17.5 5 22 12 22 12C22 12 17.5 19 12 19C6.5 19 2 12 2 12C2 12 6.5 5 12 5Z" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-        </div>
-        <div>
-          <h1 className="text-xl font-bold tracking-tight gradient-text">Frazer</h1>
-          <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">Razer, unbloated</p>
-        </div>
-      </div>
-
-      <nav className="flex-1 space-y-2">
-        {menuItems.map((item) => (
-          <SidebarItem
-            key={item.id}
-            icon={item.icon}
-            label={item.label}
-            active={activeTab === item.id}
-            onClick={() => setActiveTab(item.id)}
-          />
-        ))}
-      </nav>
-
-      <div className="mt-auto space-y-2 pt-4 border-t border-border-color">
-        <SidebarItem icon={Settings2} label="Settings" onClick={() => setActiveTab('settings')} active={activeTab === 'settings'} />
-      </div>
-    </aside>
+    <button
+      onClick={() => setActiveTab(id)}
+      className={`relative w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm transition-colors ${
+        active ? 'text-fg' : 'text-fg-muted hover:text-fg hover:bg-white/[0.03]'
+      }`}
+    >
+      {active && (
+        <motion.span
+          layoutId="nav-pill"
+          transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+          className="absolute inset-0 rounded-xl bg-white/[0.06] border border-line"
+        >
+          <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r-full accent-gradient" />
+        </motion.span>
+      )}
+      <Icon size={18} className={`relative ${active ? 'text-mint' : ''}`} />
+      <span className="relative font-medium">{label}</span>
+    </button>
   );
 };
+
+/** Live headset status at the bottom of the sidebar. */
+const HeadsetChip = () => {
+  const headset = useAudioStore((s) => s.headsets[0]);
+  const battery = headset?.battery_level;
+  const Icon = headset?.is_charging ? BatteryCharging : BatteryMedium;
+  const online = !!headset?.is_connected;
+
+  return (
+    <div className="surface p-3.5 !rounded-2xl">
+      <div className="flex items-center gap-2 text-xs">
+        <span className="relative flex w-2 h-2">
+          {online && <span className="absolute inset-0 rounded-full bg-mint animate-ping opacity-60" />}
+          <span className={`relative w-2 h-2 rounded-full ${online ? 'bg-mint' : 'bg-fg-dim'}`} />
+        </span>
+        <span className="text-fg-muted truncate">{headset ? (online ? 'Connected' : 'Headset off') : 'No headset'}</span>
+      </div>
+      {headset && (
+        <>
+          <p className="text-sm font-semibold mt-2 truncate">{headset.name.replace('Razer ', '')}</p>
+          {battery != null && (
+            <div className="flex items-center gap-2 mt-2">
+              <Icon size={15} className={battery < 20 ? 'text-coral' : 'text-mint'} />
+              <div className="flex-1 h-1.5 rounded-full bg-white/[0.07] overflow-hidden">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${battery}%` }}
+                  transition={{ type: 'spring', stiffness: 80, damping: 20 }}
+                  className={`h-full rounded-full ${battery < 20 ? 'bg-coral' : 'accent-gradient'}`}
+                />
+              </div>
+              <span className="text-xs font-mono text-fg-muted">{battery}%</span>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+export const Sidebar = () => (
+  <aside className="w-sidebar shrink-0 flex flex-col gap-6 p-4 border-r border-line bg-ink-950/40 backdrop-blur-xl">
+    <nav className="space-y-1 mt-2">
+      {NAV.map((n) => (
+        <NavItem key={n.id} {...n} />
+      ))}
+    </nav>
+    <div className="mt-auto">
+      <HeadsetChip />
+    </div>
+  </aside>
+);

@@ -23,6 +23,7 @@ export interface HeadsetInfo {
 export interface HeadsetSettings {
   /** Hardware EQ active; Synapse switches it off while THX Spatial is on. */
   eq_enabled: boolean | null;
+  eq_group: number | null;
   eq_preset: number | null;
   eq_bands: number[] | null;
   sidetone_enabled: boolean | null;
@@ -44,8 +45,25 @@ export const getConnectedHeadsets = async (): Promise<HeadsetInfo[]> => {
   }
 };
 
+export interface EqSetting {
+  name: string | null;
+  preset: number;
+  bands: number[];
+}
+
+export interface AppConfig {
+  active_eq: EqSetting | null;
+  button_cycle: EqSetting[];
+  cycle_pos: number;
+}
+
 export const getHeadsetSettings = () => invoke<HeadsetSettings>("get_headset_settings");
-export const setHeadsetEq = (preset: number, bands: number[]) => invoke("set_headset_eq", { preset, bands });
+export const setHeadsetEq = (preset: number, bands: number[], name: string | null) =>
+  invoke("set_headset_eq", { preset, bands, name });
+export const getAppConfig = () => invoke<AppConfig>("get_app_config");
+export const setButtonCycle = (cycle: EqSetting[]) => invoke("set_button_cycle", { cycle });
+/** Fired when the headset changed something itself (EQ button, mic button, power). */
+export const onHeadsetSettingsChanged = (callback: () => void) => listen("headset-settings-changed", () => callback());
 export const setHeadsetSidetone = (enabled: boolean, level: number) => invoke("set_headset_sidetone", { enabled, level });
 export const setHeadsetMicMute = (muted: boolean) => invoke("set_headset_mic_mute", { muted });
 export const setHeadsetMicEqPreset = (preset: number) => invoke("set_headset_mic_eq_preset", { preset });

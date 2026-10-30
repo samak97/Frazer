@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Layers, Play, Trash2, Plus } from 'lucide-react';
 import { useHeadsetStore } from '../../stores/headsetStore';
 import { loadProfiles, saveProfiles } from '../../utils/tauri-bridge';
+import { Card, CardTitle, Page, item } from '../common/Page';
 
 interface Profile {
   name: string;
@@ -18,7 +20,7 @@ export const ProfilesPanel = () => {
   const [name, setName] = useState('');
 
   useEffect(() => {
-    loadSettings();
+    loadSettings(true);
     loadProfiles<Profile>().then(setProfiles).catch(console.error);
   }, [loadSettings]);
 
@@ -42,60 +44,58 @@ export const ProfilesPanel = () => {
   };
 
   const apply = async (p: Profile) => {
-    applyEq(p.eq_preset, p.eq_bands);
+    applyEq(p.eq_preset, p.eq_bands, p.name);
     await setSidetone(p.sidetone_enabled, p.sidetone_level);
     await setMicEqPreset(p.mic_eq_preset);
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div>
-        <h2 className="text-3xl font-bold tracking-tight">Profiles</h2>
-        <p className="text-text-dim mt-1">Snapshots of EQ, sidetone and mic EQ you can switch between in one click.</p>
-      </div>
-
-      <div className="premium-card glass p-6 flex gap-3">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && saveCurrent()}
-          placeholder="Profile name"
-          className="flex-1 bg-white/5 px-4 py-2 rounded-xl border border-border-color outline-none focus:border-accent-primary text-sm"
-        />
-        <button
-          onClick={saveCurrent}
-          disabled={!settings?.eq_bands || !name.trim()}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-accent-primary text-white text-sm font-semibold disabled:opacity-40"
-        >
-          <Plus size={16} />
-          Save current
-        </button>
-      </div>
+    <Page title="Profiles" subtitle="Snapshots of EQ, sidetone and voice EQ you can switch with one click.">
+      <Card>
+        <CardTitle icon={Plus} title="Save current setup" />
+        <div className="flex gap-3">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && saveCurrent()}
+            placeholder="Profile name, e.g. Late-night music"
+            className="flex-1 bg-white/[0.03] px-4 py-2.5 rounded-xl border border-line outline-none focus:border-mint/60 text-sm transition-colors"
+          />
+          <button onClick={saveCurrent} disabled={!settings?.eq_bands || !name.trim()} className="chip chip-active !px-5 disabled:opacity-40">
+            Save
+          </button>
+        </div>
+      </Card>
 
       {profiles.length === 0 ? (
-        <div className="flex flex-col items-center gap-4 text-center text-text-dim py-16">
-          <Layers className="opacity-50" size={32} />
-          <p>No profiles yet. Set things up how you like, then save them here.</p>
-        </div>
+        <motion.div variants={item} className="flex flex-col items-center gap-3 text-center text-fg-dim py-14">
+          <Layers className="opacity-50 animate-float" size={32} />
+          <p className="text-sm">No profiles yet. Set things up how you like, then save them here.</p>
+        </motion.div>
       ) : (
-        <div className="space-y-3">
-          {profiles.map((p) => (
-            <div key={p.name} className="glass p-4 rounded-2xl flex items-center gap-4">
-              <span className="flex-1 font-semibold">{p.name}</span>
-              <button onClick={() => apply(p)} className="p-2 rounded-lg hover:bg-white/5 text-accent-primary" title="Apply">
-                <Play size={18} />
-              </button>
-              <button
-                onClick={() => persist(profiles.filter((x) => x.name !== p.name))}
-                className="p-2 rounded-lg hover:bg-red-500/10 text-text-dim hover:text-red-500"
-                title="Delete"
-              >
-                <Trash2 size={18} />
-              </button>
-            </div>
-          ))}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <AnimatePresence>
+            {profiles.map((p) => (
+              <motion.div key={p.name} layout variants={item} exit={{ opacity: 0, scale: 0.95 }} className="surface surface-hover p-4 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-mint/10 text-mint flex items-center justify-center">
+                  <Layers size={18} />
+                </div>
+                <span className="flex-1 font-semibold truncate">{p.name}</span>
+                <motion.button whileTap={{ scale: 0.9 }} onClick={() => apply(p)} className="chip chip-active flex items-center gap-1.5">
+                  <Play size={13} /> Apply
+                </motion.button>
+                <button
+                  onClick={() => persist(profiles.filter((x) => x.name !== p.name))}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center text-fg-dim hover:bg-coral/10 hover:text-coral transition-colors"
+                  aria-label="Delete profile"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </motion.div>
+            ))}
+          </AnimatePresence>
         </div>
       )}
-    </div>
+    </Page>
   );
 };

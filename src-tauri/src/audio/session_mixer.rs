@@ -6,15 +6,20 @@ use windows::Win32::Media::Audio::{
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::System::Com::{CoInitializeEx, CoCreateInstance, CLSCTX_ALL, COINIT_MULTITHREADED};
 use windows::core::Interface;
-use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT};
-use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::Foundation::S_OK;
 
+use super::app_info::app_info;
+
+/// One row in the mixer: all audio sessions belonging to the same app.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AudioSession {
+    pub id: String,
     pub name: String,
+    /// PNG data URL of the app icon, when one could be extracted.
+    pub icon: Option<String>,
     pub volume: f32,
     pub is_muted: bool,
-    pub process_id: u32,
+    pub process_ids: Vec<u32>,
 }
 
 unsafe fn get_session_manager() -> windows::core::Result<IAudioSessionManager2> {
@@ -33,115 +38,61 @@ unsafe fn get_endpoint_volume() -> windows::core::Result<IAudioEndpointVolume> {
     Ok(endpoint_volume)
 }
 
-fn get_process_name(pid: u32) -> String {
-    if pid == 0 {
-        return "System Sounds".to_string();
+/// Calls `f` with every session on the default output device and its process id.
+unsafe fn for_each_session(mut f: impl FnMut(&IAudioSessionControl2, &ISimpleAudioVolume, u32)) -> Result<(), String> {
+    let manager = get_session_manager().map_err(|e| format!("Failed to get session manager: {:?}", e))?;
+    let sessions: IAudioSessionEnumerator = manager.GetSessionEnumerator().map_err(|e| format!("Failed to get enumerator: {:?}", e))?;
+    for i in 0..sessions.GetCount().unwrap_or(0) {
+        let Ok(control) = sessions.GetSession(i) else { continue };
+        let (Ok(control2), Ok(volume)) = (control.cast::<IAudioSessionControl2>(), control.cast::<ISimpleAudioVolume>()) else { continue };
+        let Ok(pid) = control2.GetProcessId() else { continue };
+        f(&control2, &volume, pid);
     }
-    unsafe {
-        let handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
-            Ok(h) => h,
-            Err(_) => return format!("PID {}", pid),
-        };
-        
-        let mut buffer = [0u16; 1024];
-        let mut size = buffer.len() as u32;
-        let result = QueryFullProcessImageNameW(handle, PROCESS_NAME_FORMAT(0), windows::core::PWSTR(buffer.as_mut_ptr()), &mut size);
-        let _ = CloseHandle(handle);
-        
-        if result.is_ok() {
-            let full_path = String::from_utf16_lossy(&buffer[..size as usize]);
-            if let Some(name) = full_path.split('\\').last() {
-                return name.to_string();
-            }
-            full_path
-        } else {
-            format!("PID {}", pid)
-        }
-    }
+    Ok(())
 }
 
 pub fn get_audio_sessions() -> Result<Vec<AudioSession>, String> {
+    let mut rows: Vec<AudioSession> = Vec::new();
     unsafe {
-        let manager = get_session_manager().map_err(|e| format!("Failed to get session manager: {:?}", e))?;
-        let session_enumerator: IAudioSessionEnumerator = manager.GetSessionEnumerator().map_err(|e| format!("Failed to get enumerator: {:?}", e))?;
-        
-        let count = session_enumerator.GetCount().unwrap_or(0);
-        let mut result = Vec::new();
-        
-        for i in 0..count {
-            if let Ok(session_control) = session_enumerator.GetSession(i) {
-                if let Ok(control2) = session_control.cast::<IAudioSessionControl2>() {
-                    if let Ok(pid) = control2.GetProcessId() {
-                        if let Ok(simple_vol) = session_control.cast::<ISimpleAudioVolume>() {
-                            if let Ok(vol) = simple_vol.GetMasterVolume() {
-                                if let Ok(muted) = simple_vol.GetMute() {
-                                    let is_muted = muted.as_bool();
-                                    let name = get_process_name(pid);
-                                    result.push(AudioSession {
-                                        name,
-                                        volume: vol,
-                                        is_muted,
-                                        process_id: pid,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
+        for_each_session(|control, volume, pid| {
+            let (Ok(level), Ok(muted)) = (volume.GetMasterVolume(), volume.GetMute()) else { return };
+            let (id, name, icon) = if control.IsSystemSoundsSession() == S_OK {
+                ("system".to_string(), "System sounds".to_string(), None)
+            } else {
+                let Some(info) = app_info(pid) else { return };
+                (info.key, info.name, info.icon)
+            };
+            match rows.iter_mut().find(|r| r.id == id) {
+                Some(row) => row.process_ids.push(pid),
+                None => rows.push(AudioSession { id, name, icon, volume: level, is_muted: muted.as_bool(), process_ids: vec![pid] }),
             }
-        }
-        
-        println!("Enumerated {} sessions", result.len());
-        Ok(result)
+        })?;
     }
+    Ok(rows)
 }
 
-pub fn set_session_volume(pid: u32, volume: f32) -> Result<(), String> {
+pub fn set_session_volume(pids: &[u32], level: f32) -> Result<(), String> {
+    let mut hit = false;
     unsafe {
-        let manager = get_session_manager().map_err(|e| format!("Failed to get session manager: {:?}", e))?;
-        let session_enumerator: IAudioSessionEnumerator = manager.GetSessionEnumerator().map_err(|e| format!("Failed to get enumerator: {:?}", e))?;
-        
-        let count = session_enumerator.GetCount().unwrap_or(0);
-        for i in 0..count {
-            if let Ok(session_control) = session_enumerator.GetSession(i) {
-                if let Ok(control2) = session_control.cast::<IAudioSessionControl2>() {
-                    if let Ok(session_pid) = control2.GetProcessId() {
-                        if session_pid == pid {
-                            if let Ok(simple_vol) = session_control.cast::<ISimpleAudioVolume>() {
-                                simple_vol.SetMasterVolume(volume, std::ptr::null()).map_err(|e| format!("Failed to set volume: {:?}", e))?;
-                                return Ok(());
-                            }
-                        }
-                    }
-                }
+        for_each_session(|_, volume, pid| {
+            if pids.contains(&pid) {
+                hit |= volume.SetMasterVolume(level, std::ptr::null()).is_ok();
             }
-        }
-        Err("Session not found".to_string())
+        })?;
     }
+    hit.then_some(()).ok_or_else(|| "Session not found".to_string())
 }
 
-pub fn set_session_mute(pid: u32, mute: bool) -> Result<(), String> {
+pub fn set_session_mute(pids: &[u32], mute: bool) -> Result<(), String> {
+    let mut hit = false;
     unsafe {
-        let manager = get_session_manager().map_err(|e| format!("Failed to get session manager: {:?}", e))?;
-        let session_enumerator: IAudioSessionEnumerator = manager.GetSessionEnumerator().map_err(|e| format!("Failed to get enumerator: {:?}", e))?;
-        
-        let count = session_enumerator.GetCount().unwrap_or(0);
-        for i in 0..count {
-            if let Ok(session_control) = session_enumerator.GetSession(i) {
-                if let Ok(control2) = session_control.cast::<IAudioSessionControl2>() {
-                    if let Ok(session_pid) = control2.GetProcessId() {
-                        if session_pid == pid {
-                            if let Ok(simple_vol) = session_control.cast::<ISimpleAudioVolume>() {
-                                simple_vol.SetMute(mute, std::ptr::null()).map_err(|e| format!("Failed to set mute: {:?}", e))?;
-                                return Ok(());
-                            }
-                        }
-                    }
-                }
+        for_each_session(|_, volume, pid| {
+            if pids.contains(&pid) {
+                hit |= volume.SetMute(mute, std::ptr::null()).is_ok();
             }
-        }
-        Err("Session not found".to_string())
+        })?;
     }
+    hit.then_some(()).ok_or_else(|| "Session not found".to_string())
 }
 
 pub fn toggle_master_mute() -> Result<bool, String> {

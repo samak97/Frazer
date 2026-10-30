@@ -1,8 +1,27 @@
 //! Driver for headsets Synapse 4 drives with its `AudioMxicDevice` class
 //! (BlackShark V2 Pro 2023 and other MXIC-chip models).
 
-use crate::hid::driver::{Capabilities, HeadsetDriver, Result, Settings, Status};
-use crate::hid::mxic::{cmd, HidIo, MxicClient};
+use crate::hid::driver::{Capabilities, HeadsetDriver, HeadsetEvent, Result, Settings, Status};
+use crate::hid::mxic::{cmd, event, parse_events as parse_frames, HidIo, MxicClient};
+
+/// Maps MXIC notify frames (Synapse's `rzHardwareEventsAudioMxicParser`) to headset events.
+pub fn parse_events(report: &[u8]) -> Vec<HeadsetEvent> {
+    parse_frames(report)
+        .into_iter()
+        .filter_map(|(record, payload)| {
+            let v = *payload.first()?;
+            Some(match record {
+                event::PRESET_EQ_INDEX => HeadsetEvent::EqPreset(v),
+                event::WIRELESS => HeadsetEvent::HeadsetPower(v == 1),
+                event::BATTERY => HeadsetEvent::Battery(v.min(100)),
+                event::CHARGING => HeadsetEvent::Charging(v == 1),
+                event::MIC => HeadsetEvent::MicMuted(v == 1),
+                event::SIDETONE => HeadsetEvent::Sidetone(v == 1),
+                _ => return None,
+            })
+        })
+        .collect()
+}
 
 pub struct MxicHeadset<I: HidIo> {
     name: &'static str,

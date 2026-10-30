@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { SlidersHorizontal, RotateCcw, Sparkles } from 'lucide-react';
+import { SlidersHorizontal, RotateCcw, Sparkles, MousePointerClick, AlertTriangle } from 'lucide-react';
 import {
   CUSTOM_EQ_INDEX,
+  CYCLE_CHOICES,
   EQ_MAX_DB,
   EQ_MIN_DB,
   EQ_PRESETS,
@@ -10,147 +11,223 @@ import {
   useHeadsetStore,
 } from '../../stores/headsetStore';
 import { DeviceNotice } from '../common/DeviceNotice';
+import { Card, CardTitle, Page, item } from '../common/Page';
 
-const BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
-const FLAT = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+const BANDS = [31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+const FLAT = BANDS.map(() => 0);
+const RANGE = EQ_MAX_DB - EQ_MIN_DB;
+/** Graph geometry (SVG units): one column per band. */
+const W = 1000;
+const H = 240;
+const PAD = 22;
+
+const yOf = (db: number) => PAD + ((EQ_MAX_DB - db) / RANGE) * (H - 2 * PAD);
+const xOf = (i: number) => (W / BANDS.length) * (i + 0.5);
+
+/** Smooth curve through the band points (Catmull-Rom converted to cubic Béziers). */
+function curvePath(gains: number[]) {
+  const pts = gains.map((g, i) => [xOf(i), yOf(g)] as const);
+  let d = `M ${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [p0, p1, p2, p3] = [pts[i - 1] ?? pts[i], pts[i], pts[i + 1], pts[i + 2] ?? pts[i + 1]];
+    const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+    const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+    d += ` C ${c1[0]} ${c1[1]}, ${c2[0]} ${c2[1]}, ${p2[0]} ${p2[1]}`;
+  }
+  return d;
+}
+
+const EqGraph = ({ gains, onChange }: { gains: number[]; onChange: (band: number, db: number) => void }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const dragging = useRef<number | null>(null);
+
+  const dbAt = (clientY: number) => {
+    const r = ref.current!.getBoundingClientRect();
+    const t = (clientY - r.top) / r.height;
+    const svgY = t * H;
+    const db = EQ_MAX_DB - ((svgY - PAD) / (H - 2 * PAD)) * RANGE;
+    return Math.max(EQ_MIN_DB, Math.min(EQ_MAX_DB, Math.round(db)));
+  };
+
+  const move = (e: React.PointerEvent) => {
+    if (dragging.current == null) return;
+    const db = dbAt(e.clientY);
+    if (db !== gains[dragging.current]) onChange(dragging.current, db);
+  };
+
+  const line = curvePath(gains);
+  return (
+    <div>
+      <div
+        ref={ref}
+        className="relative h-64 touch-none"
+        onPointerMove={move}
+        onPointerUp={() => (dragging.current = null)}
+        onPointerLeave={() => (dragging.current = null)}
+      >
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full overflow-visible">
+          <defs>
+            <linearGradient id="eqStroke" x1="0" x2="1">
+              <stop offset="0" stopColor="#22d3ee" />
+              <stop offset="1" stopColor="#3df5b0" />
+            </linearGradient>
+            <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#3df5b0" stopOpacity="0.28" />
+              <stop offset="1" stopColor="#3df5b0" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {[EQ_MAX_DB, 0, EQ_MIN_DB].map((db) => (
+            <line key={db} x1="0" x2={W} y1={yOf(db)} y2={yOf(db)} stroke="rgba(255,255,255,0.07)" strokeDasharray={db === 0 ? '' : '4 6'} vectorEffect="non-scaling-stroke" />
+          ))}
+          {BANDS.map((_, i) => (
+            <line key={i} x1={xOf(i)} x2={xOf(i)} y1={PAD} y2={H - PAD} stroke="rgba(255,255,255,0.04)" vectorEffect="non-scaling-stroke" />
+          ))}
+          <motion.path animate={{ d: `${line} L ${xOf(9)} ${H} L ${xOf(0)} ${H} Z` }} transition={{ type: 'spring', stiffness: 220, damping: 26 }} fill="url(#eqFill)" />
+          <motion.path animate={{ d: line }} transition={{ type: 'spring', stiffness: 220, damping: 26 }} fill="none" stroke="url(#eqStroke)" strokeWidth="3" vectorEffect="non-scaling-stroke" style={{ filter: 'drop-shadow(0 0 6px rgba(61,245,176,0.5))' }} />
+        </svg>
+
+        {gains.map((g, i) => (
+          <motion.button
+            key={i}
+            aria-label={`${BANDS[i]} Hz`}
+            onPointerDown={(e) => {
+              // Capture on the graph so the drag keeps tracking outside the knob.
+              ref.current?.setPointerCapture(e.pointerId);
+              dragging.current = i;
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowUp') onChange(i, Math.min(EQ_MAX_DB, g + 1));
+              if (e.key === 'ArrowDown') onChange(i, Math.max(EQ_MIN_DB, g - 1));
+            }}
+            animate={{ top: `${(yOf(g) / H) * 100}%` }}
+            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            whileHover={{ scale: 1.25 }}
+            className="absolute -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white shadow-[0_0_0_5px_rgba(61,245,176,0.22),0_4px_12px_rgba(0,0,0,0.6)] cursor-grab active:cursor-grabbing focus:outline-none focus:shadow-[0_0_0_7px_rgba(61,245,176,0.4)]"
+            style={{ left: `${(xOf(i) / W) * 100}%` }}
+          />
+        ))}
+      </div>
+      <div className="grid grid-cols-10 mt-3">
+        {BANDS.map((f, i) => (
+          <div key={f} className="text-center">
+            <p className="text-xs font-mono text-fg-muted tabular-nums">{gains[i] > 0 ? '+' : ''}{gains[i]}</p>
+            <p className="text-[10px] text-fg-dim mt-0.5">{f >= 1000 ? `${f / 1000}k` : f}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 export const EqualizerPanel = () => {
-  const { settings, loadSettings, applyEq } = useHeadsetStore();
+  const { settings, loadSettings, loadConfig, applyEq, buttonCycle, toggleCycleEntry } = useHeadsetStore();
 
   useEffect(() => {
     loadSettings();
-  }, [loadSettings]);
+    loadConfig();
+  }, [loadSettings, loadConfig]);
 
   if (!settings?.eq_bands) return <DeviceNotice title="Equalizer" />;
 
   const gains = settings.eq_bands;
   const activePreset = settings.eq_preset;
   const isCustom = activePreset === CUSTOM_EQ_INDEX;
-  const activeRecommended = isCustom
-    ? RECOMMENDED_EQ.find((r) => r.bands.every((b, i) => b === gains[i]))?.name
-    : undefined;
+  const activeRecommended = isCustom ? RECOMMENDED_EQ.find((r) => r.bands.every((b, i) => b === gains[i]))?.name : undefined;
 
-  const handleBandChange = (index: number, value: number) => {
-    const newGains = [...gains];
-    newGains[index] = value;
-    applyEq(CUSTOM_EQ_INDEX, newGains);
+  const setBand = (index: number, value: number) => {
+    const next = [...gains];
+    next[index] = value;
+    applyEq(CUSTOM_EQ_INDEX, next, 'Custom');
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight">Equalizer</h2>
-          <p className="text-text-dim mt-1">Stored on the headset, so it applies on any PC or console.</p>
-        </div>
-        <button
-          onClick={() => applyEq(CUSTOM_EQ_INDEX, FLAT)}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-sm font-semibold"
-        >
-          <RotateCcw size={16} />
-          Flat
+    <Page
+      title="Equalizer"
+      subtitle="Stored on the headset, so it follows you to any PC or console."
+      actions={
+        <button onClick={() => applyEq(CUSTOM_EQ_INDEX, FLAT, 'Flat')} className="chip chip-idle flex items-center gap-2">
+          <RotateCcw size={14} /> Flat
         </button>
-      </div>
-
+      }
+    >
       {settings.eq_enabled === false && (
-        <div className="glass p-4 rounded-2xl border border-accent-secondary/40 text-sm text-text-secondary">
-          The headset's EQ is switched off. Synapse does this while its THX Spatial is on. Pick a preset or move
-          a slider to switch it back on. Quit Synapse completely so it doesn't switch it off again.
-        </div>
+        <motion.div variants={item} className="surface !rounded-2xl p-4 flex gap-3 text-sm border-amber/30">
+          <AlertTriangle size={18} className="text-amber shrink-0 mt-0.5" />
+          <p className="text-fg-muted">
+            The headset's EQ is switched off. Synapse does this while its THX Spatial is on. Pick any preset to switch it back on, and quit Synapse completely so it stays on.
+          </p>
+        </motion.div>
       )}
 
-      <div className="premium-card glass p-8">
-        <div className="flex items-center gap-4 mb-6">
-          <Sparkles className="text-accent-primary" />
-          <h3 className="text-xl font-bold">Recommended</h3>
-          <span className="text-xs text-text-dim">Saved to the Custom slot</span>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-          {RECOMMENDED_EQ.map((r) => (
+      <Card>
+        <CardTitle icon={SlidersHorizontal} title="10-band EQ" hint="Drag the points. Each band is −5 to +5 dB." />
+        <div className="flex flex-wrap gap-2 mb-6">
+          {[...EQ_PRESETS, { name: 'Custom', index: CUSTOM_EQ_INDEX, bands: gains }].map((p) => (
             <button
-              key={r.name}
-              onClick={() => applyEq(CUSTOM_EQ_INDEX, r.bands)}
-              className={`text-left p-4 rounded-2xl border transition-all ${
-                activeRecommended === r.name
-                  ? 'bg-accent-primary/15 border-accent-primary/60'
-                  : 'bg-white/5 border-white/5 hover:bg-white/10'
-              }`}
+              key={p.name}
+              onClick={() => applyEq(p.index, p.bands, p.name)}
+              className={`chip ${activePreset === p.index && !activeRecommended ? 'chip-active' : 'chip-idle'}`}
             >
-              <div className="font-bold">{r.name}</div>
-              <div className="text-xs text-text-secondary mt-1">{r.use}</div>
-              <div className="text-[10px] text-text-dim mt-2 uppercase tracking-wider">{r.source}</div>
+              {p.name}
             </button>
           ))}
         </div>
-      </div>
+        <EqGraph gains={gains} onChange={setBand} />
+      </Card>
 
-      <div className="premium-card glass p-8">
-        <div className="flex items-center gap-4 mb-8 flex-wrap">
-          <SlidersHorizontal className="text-accent-primary" />
-          <h3 className="text-xl font-bold">10-Band Equalizer</h3>
-
-          <div className="ml-auto flex gap-2 flex-wrap">
-            {[...EQ_PRESETS, { name: 'Custom', index: CUSTOM_EQ_INDEX, bands: gains }].map((preset) => (
-              <button
-                key={preset.name}
-                onClick={() => applyEq(preset.index, preset.bands)}
-                className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all ${
-                  activePreset === preset.index
-                    ? 'bg-white/10 text-white border border-white/20'
-                    : 'text-text-dim hover:text-text-primary hover:bg-white/5'
+      <Card>
+        <CardTitle icon={Sparkles} title="Recommended" hint="Tuned for this headset. Saved to the Custom slot." />
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          {RECOMMENDED_EQ.map((r) => {
+            const active = activeRecommended === r.name;
+            return (
+              <motion.button
+                key={r.name}
+                whileHover={{ y: -3 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => applyEq(CUSTOM_EQ_INDEX, r.bands, r.name)}
+                className={`relative text-left p-4 rounded-2xl border overflow-hidden transition-colors ${
+                  active ? 'border-mint/60 bg-mint/[0.07]' : 'border-line bg-white/[0.02] hover:bg-white/[0.05]'
                 }`}
               >
-                {preset.name}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex justify-between items-end h-64 gap-2 px-4">
-          {BANDS.map((freq, index) => {
-            const gain = gains[index] ?? 0;
-            const heightPercentage = ((gain - EQ_MIN_DB) / (EQ_MAX_DB - EQ_MIN_DB)) * 100;
-
-            return (
-              <div key={freq} className="flex flex-col items-center gap-4 w-full group">
-                <div className="text-xs font-bold text-accent-primary">
-                  {gain > 0 ? '+' : ''}{gain}dB
+                <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="absolute inset-x-0 bottom-1 h-10 w-full opacity-40">
+                  <path d={curvePath(r.bands)} fill="none" stroke="#3df5b0" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+                </svg>
+                <div className="relative">
+                  <p className="font-semibold">{r.name}</p>
+                  <p className="text-xs text-fg-muted mt-1">{r.use}</p>
+                  <p className="text-[10px] text-fg-dim mt-3 uppercase tracking-wider pb-12">{r.source}</p>
                 </div>
-
-                <div className="relative w-8 h-48 bg-black/40 rounded-full border border-white/5 flex items-end justify-center py-2">
-                  <div className="absolute inset-0 flex flex-col justify-between py-2 items-center opacity-20 pointer-events-none">
-                    <div className="w-2 h-[1px] bg-white"></div>
-                    <div className="w-4 h-[1px] bg-white/50"></div>
-                    <div className="w-2 h-[1px] bg-white"></div>
-                  </div>
-
-                  <input
-                    type="range"
-                    min={EQ_MIN_DB}
-                    max={EQ_MAX_DB}
-                    step="1"
-                    value={gain}
-                    onChange={(e) => handleBandChange(index, parseInt(e.target.value, 10))}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 [writing-mode:vertical-lr] [direction:rtl]"
-                  />
-
-                  <motion.div
-                    initial={false}
-                    animate={{ height: `${heightPercentage}%` }}
-                    className="w-2 bg-gradient-to-t from-accent-primary/50 to-accent-secondary rounded-full relative shadow-[0_0_10px_rgba(139,92,246,0.3)] transition-all duration-100 ease-out"
-                  >
-                    <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-4 h-4 bg-white rounded-full shadow-md" />
-                  </motion.div>
-                </div>
-
-                <div className="text-xs font-medium text-text-dim mt-2 uppercase tracking-tight">
-                  {freq >= 1000 ? `${freq / 1000}k` : freq}
-                </div>
-              </div>
+              </motion.button>
             );
           })}
         </div>
-      </div>
-    </div>
+      </Card>
+
+      <Card>
+        <CardTitle
+          icon={MousePointerClick}
+          title="Headset EQ button"
+          hint="Each press of the button on the headset steps to the next preset you pick here, in this order."
+        />
+        <div className="flex flex-wrap gap-2">
+          {CYCLE_CHOICES.map((c) => {
+            const pos = buttonCycle.indexOf(c.name!);
+            return (
+              <motion.button
+                key={c.name}
+                layout
+                onClick={() => toggleCycleEntry(c.name!)}
+                className={`chip flex items-center gap-2 ${pos >= 0 ? 'chip-active' : 'chip-idle'}`}
+              >
+                {pos >= 0 && <span className="w-4 h-4 rounded-full bg-ink-950/25 text-[10px] flex items-center justify-center">{pos + 1}</span>}
+                {c.name}
+              </motion.button>
+            );
+          })}
+        </div>
+        {buttonCycle.length === 0 && <p className="text-xs text-fg-dim mt-3">Nothing selected: the button keeps the headset's own behaviour.</p>}
+      </Card>
+    </Page>
   );
 };

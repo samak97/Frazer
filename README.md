@@ -10,9 +10,17 @@ A lightweight replacement for Razer Synapse on Windows. Frazer talks to Razer he
 
 To add another model, see [docs/adding-a-device.md](docs/adding-a-device.md).
 
-Also included: a per-app Windows volume mixer and local profiles.
+Also included:
+- **Headset EQ button:** each press steps through presets you choose in Frazer.
+- **EQ restore:** your last EQ is re-applied whenever the headset or dongle reconnects.
+- **Recommended EQ presets:** measured AutoEQ correction plus community curves.
+- **Volume mixer:** per-app volume, with real app names and icons.
+- **Tray and startup:** runs in the tray, with optional silent start with Windows.
+- **Profiles:** saved locally.
 
 THX Spatial Audio isn't supported. It's a Windows audio driver Synapse installs, not a headset setting.
+
+**Quit Synapse completely** (tray icon → Exit) when using Frazer. Synapse also listens to the EQ button and switches the headset's hardware EQ off while THX is on.
 
 ## Run
 
@@ -23,9 +31,9 @@ bun install
 bun run tauri dev
 ```
 
-To build an installer: `bun run tauri build`.
+To build an installer: `bun run tauri build`. The app icon comes from `app-icon.svg`; regenerate it with `bun run tauri icon app-icon.svg`.
 
-Closing Synapse isn't required, but if both apps change settings at once, the last write wins.
+**Debugging the UI:** start the app with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`. Then `bun tools/debug/cdp-eval.ts "<js>"` runs code inside the app, and `bun tools/debug/cdp-shot.ts out.png` takes a screenshot.
 
 ## How it works
 

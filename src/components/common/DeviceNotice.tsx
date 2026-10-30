@@ -1,29 +1,38 @@
-import { Headphones } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Headphones, RefreshCw } from 'lucide-react';
 import { useHeadsetStore } from '../../stores/headsetStore';
 
 /** Shown in place of a settings page while the headset can't be read. */
 export const DeviceNotice = ({ title }: { title: string }) => {
   const { loading, error, loadSettings } = useHeadsetStore();
 
-  return (
-    <div className="flex flex-col items-center justify-center h-[60vh] text-center gap-4">
-      <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center">
-        <Headphones className="text-text-dim opacity-50" size={32} />
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="skeleton h-9 w-56" />
+        <div className="skeleton h-40" />
+        <div className="skeleton h-64" />
       </div>
-      <h2 className="text-2xl font-bold tracking-tight">{title}</h2>
-      <p className="text-text-dim max-w-md">
-        {loading
-          ? 'Reading settings from the headset…'
-          : error ?? 'Turn on your headset and make sure its dongle is plugged in.'}
+    );
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="flex flex-col items-center justify-center h-[70vh] text-center gap-4"
+    >
+      <div className="w-20 h-20 rounded-3xl surface flex items-center justify-center animate-float">
+        <Headphones className="text-mint" size={34} />
+      </div>
+      <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>
+      <p className="text-fg-muted max-w-md text-sm">
+        {error ?? 'Turn on your headset and make sure its dongle is plugged in.'}
       </p>
-      {!loading && (
-        <button
-          onClick={loadSettings}
-          className="px-6 py-2.5 rounded-xl bg-accent-primary text-white font-bold hover:scale-105 transition-all"
-        >
-          Retry
-        </button>
-      )}
-    </div>
+      <button onClick={() => loadSettings()} className="chip chip-active flex items-center gap-2 mt-2">
+        <RefreshCw size={14} />
+        Try again
+      </button>
+    </motion.div>
   );
 };

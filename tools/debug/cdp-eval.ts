@@ -6,7 +6,7 @@ const [expr, waitArg] = process.argv.slice(2);
 const waitMs = Number(waitArg ?? 1500);
 
 const targets: any[] = await (await fetch("http://127.0.0.1:9222/json")).json();
-const page = targets.find((t) => t.type === "page" && t.url.includes("localhost:1420"));
+const page = targets.find((t) => t.type === "page" && (t.url.includes("localhost:1420") || t.url.includes("tauri.localhost")));
 if (!page) throw new Error("Frazer page not found: " + JSON.stringify(targets.map((t) => t.url)));
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);

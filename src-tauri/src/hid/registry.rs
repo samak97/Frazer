@@ -2,8 +2,8 @@
 
 use hidapi::HidApi;
 
-use super::driver::HeadsetDriver;
-use super::drivers::mxic_headset::MxicHeadset;
+use super::driver::{HeadsetDriver, HeadsetEvent};
+use super::drivers::mxic_headset::{self, MxicHeadset};
 use super::transport::HidTransport;
 
 pub const RAZER_VID: u16 = 0x1532;
@@ -14,6 +14,8 @@ pub struct DeviceEntry {
     /// USB interface that carries the control channel (Synapse's `claimInterface`).
     pub interface: i32,
     pub open: fn(&HidApi, &DeviceEntry) -> Result<Box<dyn HeadsetDriver>, String>,
+    /// Decodes unsolicited input reports read from the control channel.
+    pub parse_events: fn(&[u8]) -> Vec<HeadsetEvent>,
 }
 
 fn open_mxic(api: &HidApi, e: &DeviceEntry) -> Result<Box<dyn HeadsetDriver>, String> {
@@ -26,6 +28,7 @@ pub const DEVICES: &[DeviceEntry] = &[DeviceEntry {
     name: "Razer BlackShark V2 Pro",
     interface: 3,
     open: open_mxic,
+    parse_events: mxic_headset::parse_events,
 }];
 
 /// The first supported headset currently enumerated, if any.

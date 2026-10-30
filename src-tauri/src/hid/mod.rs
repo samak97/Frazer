@@ -10,6 +10,21 @@ use hidapi::HidApi;
 
 use driver::HeadsetDriver;
 
+pub struct EventStream {
+    io: transport::HidTransport,
+    parse: fn(&[u8]) -> Vec<driver::HeadsetEvent>,
+}
+
+impl EventStream {
+    /// Waits up to `timeout_ms` for one input report; an error means the device went away.
+    pub fn read(&mut self, timeout_ms: i32) -> Result<Vec<driver::HeadsetEvent>, String> {
+        use mxic::HidIo;
+        let mut buf = [0u8; mxic::REPORT_LEN];
+        let n = self.io.read_timeout(&mut buf, timeout_ms)?;
+        Ok(if n == 0 { Vec::new() } else { (self.parse)(&buf[..n]) })
+    }
+}
+
 /// Owns the single `HidApi` instance and the currently open headset, if any.
 pub struct HeadsetManager {
     inner: Mutex<Inner>,
@@ -35,6 +50,15 @@ impl HeadsetManager {
             inner.driver = None;
         }
         present
+    }
+
+    /// Opens a second handle on the control channel for reading headset events. Windows gives
+    /// every handle its own copy of input reports, so this doesn't steal command replies.
+    pub fn open_event_stream(&self) -> Result<EventStream, String> {
+        let inner = self.inner.lock().unwrap();
+        let entry = registry::find_connected(&inner.api).ok_or("No supported headset connected")?;
+        let io = transport::HidTransport::open(&inner.api, registry::RAZER_VID, entry.pid, entry.interface)?;
+        Ok(EventStream { io, parse: entry.parse_events })
     }
 
     /// Runs `f` against the open headset, opening it first if needed. A failed call drops the
