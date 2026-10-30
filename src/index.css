@@ -1,0 +1,67 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@theme {
+  --color-bg-primary: #050508;
+  --color-bg-secondary: #0c0c14;
+  --color-bg-tertiary: #161625;
+  --color-accent-primary: #8b5cf6;
+  --color-accent-secondary: #d946ef;
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #94a3b8;
+  --color-text-dim: #64748b;
+  --color-success: #10b981;
+  --color-error: #ef4444;
+  --color-warning: #f59e0b;
+  --color-border-color: rgba(255, 255, 255, 0.08);
+
+  --width-sidebar-width: 240px;
+  --height-header-height: 64px;
+
+  --shadow-accent-glow: 0 0 20px rgba(139, 92, 246, 0.4);
+}
+
+@layer base {
+  body {
+    @apply bg-bg-primary text-text-primary overflow-hidden select-none;
+    font-family: 'Outfit', sans-serif;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-bg-tertiary/70 backdrop-blur-xl border border-border-color;
+  }
+
+  .premium-card {
+    @apply rounded-3xl border border-border-color transition-all duration-300;
+  }
+
+  .premium-card:hover {
+    @apply border-white/10 bg-white/[0.03];
+  }
+
+  .gradient-text {
+    @apply bg-gradient-to-r from-accent-primary to-accent-secondary bg-clip-text text-transparent;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-bg-tertiary rounded-full hover:bg-text-dim;
+}
+
+/* Animations */
+@keyframes pulse-glow {
+  0% { box-shadow: 0 0 5px rgba(139, 92, 246, 0.2); }
+  50% { box-shadow: 0 0 20px rgba(139, 92, 246, 0.4); }
+  100% { box-shadow: 0 0 5px rgba(139, 92, 246, 0.2); }
+}
