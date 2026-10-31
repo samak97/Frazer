@@ -104,4 +104,4 @@ Frazer is an independent project and is not affiliated with or endorsed by Razer
 
 ---
 
-Made by **Ahmed Samak** · © 2026
+Made by **Ahmed Samak** · © 2026 · [MIT License](LICENSE)

@@ -3,6 +3,7 @@ name = "frazer"
 version = "1.0.0"
 description = "Lightweight Razer headset control"
 authors = ["Ahmed Samak"]
+license = "MIT"
 edition = "2021"
 default-run = "frazer"
 
