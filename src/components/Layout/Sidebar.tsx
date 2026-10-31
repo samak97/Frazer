@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Activity, SlidersHorizontal, Volume2, Mic2, Settings2, Layers, BatteryCharging, BatteryMedium } from 'lucide-react';
+import { Activity, SlidersHorizontal, Volume2, Mic2, Settings2, Layers, Info, BatteryCharging, BatteryMedium } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 import { useAudioStore } from '../../stores/audioStore';
 
@@ -10,6 +10,7 @@ const NAV = [
   { id: 'mixer', icon: Volume2, label: 'Volume Mixer' },
   { id: 'profiles', icon: Layers, label: 'Profiles' },
   { id: 'settings', icon: Settings2, label: 'Settings' },
+  { id: 'about', icon: Info, label: 'About' },
 ];
 
 const NavItem = ({ id, icon: Icon, label }: (typeof NAV)[number]) => {

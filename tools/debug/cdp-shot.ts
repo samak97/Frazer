@@ -4,7 +4,7 @@ import { writeFileSync } from "node:fs";
 
 const [out, setup, waitArg] = process.argv.slice(2);
 const targets: any[] = await (await fetch("http://127.0.0.1:9222/json")).json();
-const page = targets.find((t) => t.type === "page" && (t.url.includes("localhost:1420") || t.url.includes("tauri.localhost")));
+const page = targets.find((t) => t.type === "page" && (t.url.includes("localhost:1420") || t.url.includes("tauri.localhost")) && !t.url.includes("#toast"));
 if (!page) throw new Error("Frazer page not found");
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);

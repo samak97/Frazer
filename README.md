@@ -1,53 +1,105 @@
-# Frazer
+<p align="center">
+  <img src="app-icon.svg" width="120" alt="Frazer icon" />
+</p>
 
-A lightweight replacement for Razer Synapse on Windows. Frazer talks to Razer headsets directly over USB HID, with no Razer services, account or background bloat.
+<h1 align="center">Frazer</h1>
+
+<p align="center">
+  <b>Manage your wireless gaming headset, without the bloat.</b><br/>
+  A lightweight, bug-free replacement for Razer Synapse with a clean UI and fully customizable EQ presets.
+</p>
+
+<p align="center">
+  <a href="https://github.com/samak97/Frazer/releases/latest"><b>⬇ Download for Windows</b></a>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" width="860" alt="Frazer dashboard" />
+</p>
+
+## Why Frazer?
+
+Razer Synapse is heavy: about a dozen background processes, an account, and settings that sometimes don't apply. On the BlackShark V2 Pro, it also switches the headset's own EQ off while THX is on and fights you over the EQ button.
+
+Frazer talks to the headset **directly over USB**, using the same commands Synapse sends. It's one small app that sits in your tray.
+
+- 🎚️ **On-headset EQ:** a 10-band EQ you drag on a live curve. It's stored on the headset, so it works on any PC or console.
+- ✨ **Recommended presets, tuned by ear on the real headset to stay loud and clean:**
+  - **Perfect:** the best all-rounder.
+  - **Balanced Music** and **Bass Music** for music.
+  - **Immersive Story** for open-world and story games.
+  - **Vocal Clarity** for videos and calls.
+  - **Reference:** a measured correction (AutoEQ, from an RTINGS measurement).
+- 🔘 **Your EQ button, your presets:** pick which presets the headset's EQ button cycles through, in your order.
+- 🔁 **EQ that sticks:** your EQ is restored and double-checked every time the headset turns on or reconnects.
+- 🎙️ **Microphone:** mute, sidetone (hear yourself) and voice EQ presets.
+- 🔋 **Live status:** battery, charging and connection, with toasts when something changes.
+- 🔊 **Per-app volume mixer:** real app names and icons.
+- 🧩 **Profiles:** save a whole setup and switch in one click.
+- 🚀 **Starts quietly with Windows** into the tray. Can also stop Synapse's background engine for you.
+
+## Screenshots
+
+| Equalizer | Recommended presets & EQ button |
+|---|---|
+| <img src="docs/screenshots/equalizer.png" alt="Equalizer" /> | <img src="docs/screenshots/presets.png" alt="Presets and EQ button cycle" /> |
+
+| Microphone | Volume mixer |
+|---|---|
+| <img src="docs/screenshots/microphone.png" alt="Microphone" /> | <img src="docs/screenshots/mixer.png" alt="Volume mixer" /> |
+
+| About |
+|---|
+| <img src="docs/screenshots/about.png" alt="About" width="49%" /> |
 
 ## Supported headsets
 
-| Headset | Battery | EQ (on-device) | Sidetone | Mic mute / mic EQ | Auto power-off |
-|---|---|---|---|---|---|
-| BlackShark V2 Pro (2023, `1532:0555`) | ✅ | ✅ 10-band + Synapse presets | ✅ | ✅ | ✅ |
+| Headset | Battery | EQ (on-device) | EQ button | Sidetone | Mic mute / voice EQ | Auto power-off |
+|---|---|---|---|---|---|---|
+| Razer BlackShark V2 Pro (2023, `1532:0555`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-To add another model, see [docs/adding-a-device.md](docs/adding-a-device.md).
+Other Razer headsets built on the same chip family can be added with a one-line registry entry. See [docs/adding-a-device.md](docs/adding-a-device.md); contributions from owners of other models are welcome.
 
-Also included:
-- **Headset EQ button:** each press steps through presets you choose in Frazer.
-- **EQ restore:** your last EQ is re-applied whenever the headset or dongle reconnects.
-- **Recommended EQ presets:** measured AutoEQ correction plus community curves.
-- **Volume mixer:** per-app volume, with real app names and icons.
-- **Tray and startup:** runs in the tray, with optional silent start with Windows.
-- **Profiles:** saved locally.
+## Install
 
-THX Spatial Audio isn't supported. It's a Windows audio driver Synapse installs, not a headset setting.
+1. Download the installer from [Releases](https://github.com/samak97/Frazer/releases/latest) and run it.
+2. Plug in the HyperSpeed dongle and turn the headset on.
+3. If Synapse is installed, Frazer shows a **Close Synapse** button. Its background engine otherwise takes over the EQ button. In **Settings** you can also stop Synapse from starting with Windows; Frazer keeps a copy of its startup entry, so you can switch it back on.
 
-**Quit Synapse completely** (tray icon → Exit) when using Frazer. Synapse also listens to the EQ button and switches the headset's hardware EQ off while THX is on.
+THX Spatial Audio isn't included. It's a Windows audio driver Synapse installs, not a headset setting.
 
-## Run
+## Build from source
 
-You need [Bun](https://bun.sh), Rust, and WebView2.
+You need [Bun](https://bun.sh), Rust, and WebView2 (included with Windows 11).
 
 ```bash
 bun install
-bun run tauri dev
+bun run tauri dev     # run in development
+bun run tauri build   # build the installers into src-tauri/target/release/bundle
 ```
-
-To build an installer: `bun run tauri build`. The app icon comes from `app-icon.svg`; regenerate it with `bun run tauri icon app-icon.svg`.
-
-**Debugging the UI:** start the app with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`. Then `bun tools/debug/cdp-eval.ts "<js>"` runs code inside the app, and `bun tools/debug/cdp-shot.ts out.png` takes a screenshot.
 
 ## How it works
 
 ```
 React UI --(invoke)--> Tauri commands --> HeadsetManager --> HeadsetDriver (per model)
-                                                               |
-                                                     MxicClient (framing) --> hidapi --> dongle (interface 3)
+                                               |                  |
+                                     event listener        MxicClient (framing) --> hidapi --> dongle
+                              (EQ button, power, battery)
 ```
 
-- **Protocol:** extracted from Synapse 4's own device code. See [docs/protocol/blackshark-v2-pro.md](docs/protocol/blackshark-v2-pro.md) and [tools/re](tools/re/README.md).
-- **`src-tauri/src/hid/mxic.rs`:** frame encoding and decoding, and the request/reply loop, with unit tests.
-- **`src-tauri/src/hid/registry.rs`:** the list of supported headsets.
-- **Hardware check:** `cd src-tauri && cargo run --bin probe`. Add `-- --rewrite` to also test the setters by writing back the current values.
+- **Protocol:** read from Synapse 4's own device code. See [docs/protocol/blackshark-v2-pro.md](docs/protocol/blackshark-v2-pro.md) and [tools/re](tools/re/README.md).
+- **Code layout:** `src-tauri/src/hid/` holds the framing, drivers, device registry and event parsing, all with unit tests.
+- **Hardware check:** `cd src-tauri && cargo run --bin probe`. It reads battery and settings without changing anything.
+- **UI debugging:** start the app with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`, then use `tools/debug/cdp-eval.ts` or `cdp-shot.ts`.
 
-## Claude skill
+## Credits
 
-`skills/sha3bolly` is an "explain like a junior engineer" Claude Code skill. Copy it into `~/.claude/skills/` to use it.
+- [AutoEQ](https://github.com/jaakkopasanen/AutoEq) and [RTINGS](https://www.rtings.com): the measured correction behind the "Reference" presets.
+- [swissmacuser.ch](https://swissmacuser.ch/?p=9690): the community music curves behind "Bass Music" and "Balanced Music".
+- Built with [Tauri](https://tauri.app), React and Rust.
+
+Frazer is an independent project and is not affiliated with or endorsed by Razer Inc. "Razer", "BlackShark" and "Synapse" are trademarks of Razer Inc., used here only to describe compatibility.
+
+---
+
+Made by **Ahmed Samak** · © 2026

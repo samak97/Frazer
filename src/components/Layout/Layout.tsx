@@ -1,7 +1,7 @@
 import React from 'react';
 import { Sidebar } from './Sidebar';
 import { TitleBar } from './TitleBar';
-import { EqToasts, SynapseBanner } from './Notices';
+import { SynapseBanner } from './Notices';
 
 export const Layout = ({ children }: { children: React.ReactNode }) => (
   <div className="relative flex flex-col h-screen w-screen bg-ink-950 text-fg overflow-hidden">
@@ -21,6 +21,5 @@ export const Layout = ({ children }: { children: React.ReactNode }) => (
         </div>
       </main>
     </div>
-    <EqToasts />
   </div>
 );

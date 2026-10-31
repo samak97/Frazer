@@ -32,37 +32,55 @@ export const EQ_PRESETS: { name: string; index: number; bands: number[] }[] = [
 export const CUSTOM_EQ_INDEX = 255;
 
 /** Curated curves written into the Custom slot. Bands: 31, 63, 125, 250, 500, 1k, 2k, 4k, 8k, 16k Hz.
- *  Shifting a whole curve only changes loudness, so each one is shifted until its highest band
- *  sits at +5: same shape, as loud as the ±5 range allows. */
+ *
+ *  Loudness rule found by listening tests on the BlackShark V2 Pro 2023: a curve spanning the full
+ *  −5…+5 range sounds quiet (most bands sit low), while a gentle curve (≤ 5 dB from top to bottom)
+ *  placed at the top of the range (0…+5) is the loudest. So each shape is compressed to a 5 dB span
+ *  and shifted until its highest band is +5. */
 export const RECOMMENDED_EQ: { name: string; use: string; source: string; bands: number[] }[] = [
   {
-    name: 'Reference',
-    use: 'Music & general use: the most accurate sound',
-    // AutoEQ FixedBandEQ for "Razer BlackShark V2 Pro 2023" (RTINGS HMS II.3 measurement, Harman target):
-    // 6.9 3.4 -1.7 0.4 4.4 -0.9 -1.9 3.0 -5.4 -1.5 dB, rounded and clamped to the headset's ±5.
-    source: 'AutoEQ (RTINGS measurement → Harman target)',
-    bands: [5, 3, -2, 0, 4, -1, -2, 3, -5, -2],
+    name: 'Balanced Music',
+    use: 'Rock, acoustic, mixed playlists: full and clear',
+    // swissmacuser "overall music experience" 1 1 2 6 4 2 1 3 -4 4 (±12 model) → (x − 6) × 0.5 + 5.
+    source: 'swissmacuser.ch, fitted to the headset',
+    bands: [2, 2, 3, 5, 4, 3, 2, 3, 0, 4],
   },
   {
-    name: 'Reference Lite',
-    use: 'Everyday listening, videos, calls: gentler correction',
-    // Same AutoEQ correction at half strength (3 2 -1 0 2 0 -1 2 -3 -1), shifted +2.
-    source: 'AutoEQ at 50%',
-    bands: [5, 4, 1, 2, 4, 2, 1, 4, -1, 1],
+    name: 'Perfect',
+    use: 'Best all-rounder: clean and balanced with headroom, so it never distorts (slightly lower volume)',
+    // Same shape as Balanced Music, topped out at +3 instead of +5. Favourite in listening tests.
+    source: 'swissmacuser.ch, fitted to the headset',
+    bands: [0, 0, 1, 3, 2, 1, 0, 1, -2, 2],
+  },
+  {
+    name: 'Immersive Story',
+    use: 'Open-world & story games: deep rumble, clear dialogue, airy ambience',
+    // Same level as Perfect (top band +3, gentle span): sub-bass lift for atmosphere, a small
+    // low-mid dip against mud, dialogue presence at 2 kHz, and air at 8–16 kHz for space and direction.
+    source: 'Tuned for this headset',
+    bands: [3, 3, 1, -1, -1, 0, 1, 0, 1, 2],
+  },
+  {
+    name: 'Vocal Clarity',
+    use: 'Videos, streams, calls and everyday use',
+    // Voices (500 Hz–4 kHz) forward, low end eased off, treble kept so nothing sounds muffled.
+    source: 'Tuned for this headset',
+    bands: [1, 2, 3, 4, 5, 5, 5, 5, 4, 3],
   },
   {
     name: 'Bass Music',
     use: 'Hip-hop, EDM, pop: deep bass',
-    // swissmacuser "music with deep bass" 8 6 8 6 4 2 1 3 5 4 (±12 model), shifted -3 to fit ±5.
-    source: 'swissmacuser.ch, fitted to ±5',
-    bands: [5, 3, 5, 3, 1, -1, -2, 0, 2, 1],
+    // swissmacuser "music with deep bass" 8 6 8 6 4 2 1 3 5 4 (±12 model) → (x − 8) × 0.5 + 5.
+    source: 'swissmacuser.ch, fitted to the headset',
+    bands: [5, 4, 5, 4, 3, 2, 1, 2, 3, 3],
   },
   {
-    name: 'Balanced Music',
-    use: 'Rock, acoustic, mixed playlists',
-    // swissmacuser "overall music experience" 1 1 2 6 4 2 1 3 -4 4 (±12 model), shifted -1 to fit ±5.
-    source: 'swissmacuser.ch, fitted to ±5',
-    bands: [0, 0, 1, 5, 3, 1, 0, 2, -5, 3],
+    name: 'Reference',
+    use: 'Measured neutral sound; can feel dull to some ears',
+    // AutoEQ FixedBandEQ for "Razer BlackShark V2 Pro 2023" (RTINGS HMS II.3, Harman target):
+    // 6.9 3.4 -1.7 0.4 4.4 -0.9 -1.9 3.0 -5.4 -1.5 dB → (x − 6.9) × 5/12.3 + 5.
+    source: 'AutoEQ (RTINGS measurement), fitted to the headset',
+    bands: [5, 4, 1, 2, 4, 2, 1, 3, 0, 2],
   },
 ];
 
@@ -78,7 +96,7 @@ export const CYCLE_CHOICES: EqSetting[] = [
   ...RECOMMENDED_EQ.map((r) => ({ name: r.name, preset: CUSTOM_EQ_INDEX, bands: r.bands })),
   ...EQ_PRESETS.map((p) => ({ name: p.name, preset: p.index, bands: p.bands })),
 ];
-const DEFAULT_CYCLE = ['Reference', 'Bass Music', 'Balanced Music', 'Game'];
+const DEFAULT_CYCLE = ['Balanced Music', 'Vocal Clarity', 'Bass Music'];
 const CYCLE_SEEDED_KEY = 'frazer.cycleSeeded';
 
 const EQ_DEBOUNCE_MS = 150;
@@ -137,14 +155,15 @@ export const useHeadsetStore = create<HeadsetState>((set, get) => {
 
     loadConfig: async () => {
       const config = await getAppConfig();
-      let names = config.button_cycle.map((c) => c.name).filter((n): n is string => !!n);
+      const known = new Set(CYCLE_CHOICES.map((c) => c.name));
+      let names = config.button_cycle.map((c) => c.name).filter((n): n is string => !!n && known.has(n));
       // First run: give the EQ button a sensible cycle instead of the firmware's.
       if (names.length === 0 && !localStorage.getItem(CYCLE_SEEDED_KEY)) {
         localStorage.setItem(CYCLE_SEEDED_KEY, '1');
         names = DEFAULT_CYCLE;
-        await saveCycle(names);
       }
-      set({ buttonCycle: names });
+      // Re-save by name so the backend picks up preset curves updated in a newer version.
+      await saveCycle(names);
     },
 
     toggleCycleEntry: async (name) => {

@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod config;
 pub mod hid;
+pub mod overlay;
 pub mod synapse;
 
 use std::sync::{Arc, Mutex};
@@ -64,7 +65,7 @@ impl AppState {
 
 type App<'a> = State<'a, Arc<AppState>>;
 
-/// Payload of the `eq-applied` event, shown as a toast in the UI.
+/// Shown in the on-top overlay toast.
 #[derive(Serialize, Clone)]
 struct EqApplied {
     name: Option<String>,
@@ -134,6 +135,13 @@ fn set_button_cycle(app: App<'_>, cycle: Vec<EqSetting>) {
         c.button_cycle = cycle;
         c.cycle_pos = 0;
     });
+}
+
+/// Shows the on-top toast with the current EQ, so the notification can be previewed from Settings.
+#[tauri::command]
+fn preview_toast(app: AppHandle, state: App<'_>) {
+    let name = state.config.get().active_eq.and_then(|e| e.name);
+    overlay::show(&app, EqApplied { name, source: "button" });
 }
 
 #[tauri::command]
@@ -226,7 +234,7 @@ fn restore_eq(app: &AppHandle, state: &AppState) {
         match state.headsets.with_driver(|d| d.settings()) {
             Ok(s) if eq_matches(&s, &eq) => {
                 eprintln!("restored EQ {:?} (verified, attempt {attempt})", eq.name);
-                let _ = app.emit("eq-applied", EqApplied { name: eq.name.clone(), source: "restore" });
+                overlay::show(app, EqApplied { name: eq.name.clone(), source: "restore" });
                 return;
             }
             Ok(s) => eprintln!("EQ changed after restore (slot {:?}), re-applying", s.eq_preset),
@@ -249,7 +257,7 @@ fn advance_button_cycle(app: &AppHandle, state: &AppState) -> bool {
             eprintln!("EQ button -> {:?}", eq.name);
             match state.apply_eq(&eq) {
                 Ok(()) => {
-                    let _ = app.emit("eq-applied", EqApplied { name: eq.name, source: "button" });
+                    overlay::show(app, EqApplied { name: eq.name, source: "button" });
                 }
                 Err(e) => eprintln!("EQ button apply failed: {e}"),
             }
@@ -371,6 +379,7 @@ pub fn run() {
             get_app_config,
             set_button_cycle,
             get_synapse_status,
+            preview_toast,
             stop_synapse,
             set_synapse_autostart,
             load_profiles,
@@ -399,6 +408,7 @@ pub fn run() {
             app.manage(state.clone());
             spawn_device_service(app.handle().clone(), state);
             build_tray(app)?;
+            overlay::create(app.handle())?;
 
             // The autostart entry stores the exe path; refresh it so it follows the installed build.
             #[cfg(not(debug_assertions))]

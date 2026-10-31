@@ -160,7 +160,7 @@ export const EqualizerPanel = () => {
       )}
 
       <Card>
-        <CardTitle icon={SlidersHorizontal} title="10-band EQ" hint="Drag the points. Each band is −5 to +5 dB." />
+        <CardTitle icon={SlidersHorizontal} title="10-band EQ" hint="Drag the points (−5 to +5 dB). Tip: for full volume keep the curve gentle and near the top. Wide curves that reach far down sound quieter." />
         <div className="flex flex-wrap gap-2 mb-6">
           {[...EQ_PRESETS, { name: 'Custom', index: CUSTOM_EQ_INDEX, bands: gains }].map((p) => (
             <button
@@ -177,7 +177,7 @@ export const EqualizerPanel = () => {
 
       <Card>
         <CardTitle icon={Sparkles} title="Recommended" hint="Tuned for this headset. Saved to the Custom slot." />
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {RECOMMENDED_EQ.map((r) => {
             const active = activeRecommended === r.name;
             return (

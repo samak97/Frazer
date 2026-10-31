@@ -7,6 +7,7 @@ import { EqualizerPanel } from './components/Equalizer/EqualizerPanel';
 import { MicrophonePanel } from './components/Microphone/MicrophonePanel';
 import { SettingsPanel } from './components/Settings/SettingsPanel';
 import { ProfilesPanel } from './components/Profiles/ProfilesPanel';
+import { AboutPanel } from './components/About/AboutPanel';
 import { useUIStore } from './stores/uiStore';
 
 const PAGES: Record<string, ComponentType> = {
@@ -16,6 +17,7 @@ const PAGES: Record<string, ComponentType> = {
   mixer: AppVolumeMixer,
   profiles: ProfilesPanel,
   settings: SettingsPanel,
+  about: AboutPanel,
 };
 
 function App() {

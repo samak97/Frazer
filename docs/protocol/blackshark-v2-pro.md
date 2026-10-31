@@ -99,6 +99,7 @@ setPresetEQIndex(idx) --> setSpeakerPresetEQGroup(1 standard | 2 esports) --> se
 ```
 
 - **Fixed slots:** Game, Music and Movie (7/8/9) are curves built into the firmware. Only the esports slots and Custom (250–255, `useEqualizerOBM`) take band data.
+- **Loudness depends on where the whole curve sits** (listening tests on the 2023 model, so subjective). Custom flat was louder than the built-in Music preset. Curves spanning the full −5…+5 range sounded quiet, because most bands sit low. The same Balanced shape compressed to a 5 dB span got louder as it was raised: peak 0 → +3 → +5, with +5 the loudest and still clean. One odd result: a flat "all +5" sounded quieter than flat 0, so the firmware may apply some headroom to uniform boosts. Frazer's recommended presets are 5 dB-span curves topping out at +5.
 - **Hardware EQ flag:** while THX Spatial is on, Synapse switches the hardware EQ off (`9E 00 01 00`) and applies the EQ in software through its THX audio driver. It switches it back on (`…01`) only when THX is off or when Synapse shuts down. If that flag is off, band writes are stored but nothing changes audibly.
 
 ## Events (headset → host)

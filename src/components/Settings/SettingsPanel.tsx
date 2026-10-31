@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Power, Info, Rocket, ShieldOff } from 'lucide-react';
+import { Power, Info, Rocket, ShieldOff, Bell } from 'lucide-react';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
+import { invoke } from '@tauri-apps/api/core';
 import { useHeadsetStore } from '../../stores/headsetStore';
 import { useSynapseStore } from '../../stores/synapseStore';
 import { Toggle } from '../common/Toggle';
@@ -48,6 +49,15 @@ export const SettingsPanel = () => {
           Closing the window keeps Frazer running in the tray. Right-click the tray icon and choose Quit to exit.
         </p>
         {autostartError && <p className="text-xs text-coral mt-2">{autostartError}</p>}
+      </Card>
+
+      <Card>
+        <CardTitle
+          icon={Bell}
+          title="Notifications"
+          hint="When the EQ button or a reconnect changes your EQ, a small notification shows on top of everything for a moment. It never takes focus, so games aren't interrupted."
+          right={<button onClick={() => invoke('preview_toast')} className="chip chip-idle">Preview</button>}
+        />
       </Card>
 
       <Card>
