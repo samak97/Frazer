@@ -59,6 +59,10 @@ Frazer talks to the headset **directly over USB**, using the same commands Synap
 | Headset | Battery | EQ (on-device) | EQ button | Sidetone | Mic mute / voice EQ | Auto power-off |
 |---|---|---|---|---|---|---|
 | Razer BlackShark V2 Pro (2023, `1532:0555`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Razer Barracuda (`053C`, 2024: `0584`) 🧪 | ✅ | 🧪 | — | ✅ | ✅ | ✅ |
+| Razer Barracuda Pro (`053A`, 2024: `0583`) 🧪 | ✅ | 🧪 | — | ✅ | ✅ | ✅ |
+
+🧪 The Barracuda models were added from Synapse's own code ([protocol notes](docs/protocol/barracuda.md)) and are still being tested on real hardware. Battery and settings should work; whether the custom EQ is audible is not confirmed yet. The Barracuda has no EQ button.
 
 Other Razer headsets built on the same chip family can be added with a one-line registry entry. See [docs/adding-a-device.md](docs/adding-a-device.md); contributions from owners of other models are welcome.
 

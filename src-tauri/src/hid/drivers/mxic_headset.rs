@@ -1,12 +1,40 @@
 //! Driver for headsets Synapse 4 drives with its `AudioMxicDevice` class
-//! (BlackShark V2 Pro 2023 and other MXIC-chip models).
+//! (BlackShark V2 Pro 2023, Barracuda and other MXIC-chip models).
 
 use crate::hid::driver::{Capabilities, HeadsetDriver, HeadsetEvent, Result, Settings, Status};
-use crate::hid::mxic::{cmd, event, parse_events as parse_frames, HidIo, MxicClient};
+use crate::hid::mxic::{cmd, event, parse_events as parse_frames, Framing, HidIo, MxicClient};
+
+/// How one MXIC model differs from the others. Everything else (command codes, value encodings)
+/// is shared by the whole family.
+#[derive(Debug, Clone, Copy)]
+pub struct MxicModel {
+    pub framing: Framing,
+    /// Input report ID of the headset's unsolicited notifications.
+    pub event_report_id: u8,
+    pub eq: EqLayout,
+}
+
+/// Which on-device EQ slot numbers a model uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EqLayout {
+    /// BlackShark V2 Pro: Default 0, Game 7, Music 8, Movie 9, esports 250–254 and Custom 255, with
+    /// preset groups and a hardware-EQ switch (Synapse's `useHardwareEqualizer`).
+    Odessa,
+    /// Barracuda (`protocolAudioMabelT1`): Default 0, Game 1, Music 2, Movie 3, Custom 255, and no
+    /// groups or EQ switch.
+    Mabel,
+}
+
+/// BlackShark V2 Pro 2023 (Synapse's base `AudioMxicDevice`).
+pub const ODESSA: MxicModel = MxicModel { framing: Framing::Standard, event_report_id: 0x02, eq: EqLayout::Odessa };
+/// Barracuda / Barracuda Pro, 2022 dongles (`AudioMxicMabelT1`, events on report 2).
+pub const MABEL: MxicModel = MxicModel { framing: Framing::Mabel, event_report_id: 0x02, eq: EqLayout::Mabel };
+/// Barracuda / Barracuda Pro, 2024 revision (`AudioMxicMabelT1_ecr`: base framing, events on report 1).
+pub const MABEL_ECR: MxicModel = MxicModel { framing: Framing::Standard, event_report_id: 0x01, eq: EqLayout::Mabel };
 
 /// Maps MXIC notify frames (Synapse's `rzHardwareEventsAudioMxicParser`) to headset events.
-pub fn parse_events(report: &[u8]) -> Vec<HeadsetEvent> {
-    parse_frames(report)
+fn events(report: &[u8], report_id: u8) -> Vec<HeadsetEvent> {
+    parse_frames(report, report_id)
         .into_iter()
         .filter_map(|(record, payload)| {
             let v = *payload.first()?;
@@ -23,20 +51,35 @@ pub fn parse_events(report: &[u8]) -> Vec<HeadsetEvent> {
         .collect()
 }
 
+/// Notifications from models that send them on report 2 (`ODESSA`, `MABEL`).
+pub fn parse_events(report: &[u8]) -> Vec<HeadsetEvent> {
+    events(report, ODESSA.event_report_id)
+}
+
+/// Notifications from `MABEL_ECR` models.
+pub fn parse_events_report1(report: &[u8]) -> Vec<HeadsetEvent> {
+    events(report, MABEL_ECR.event_report_id)
+}
+
 pub struct MxicHeadset<I: HidIo> {
     name: &'static str,
     client: MxicClient<I>,
+    eq: EqLayout,
+    /// Mabel models have one writable slot, so Frazer's esports slots (250–254) are all stored in
+    /// Custom; this remembers which one was written so read-back reports it unchanged.
+    custom_alias: Option<u8>,
 }
 
 impl<I: HidIo> MxicHeadset<I> {
-    pub fn new(name: &'static str, io: I) -> Self {
-        Self { name, client: MxicClient::new(io) }
+    pub fn new(name: &'static str, io: I, model: MxicModel) -> Self {
+        Self { name, client: MxicClient::new(io, model.framing), eq: model.eq, custom_alias: None }
     }
 }
 
 /// Slots whose bands live in onboard memory (Synapse's `useEqualizerOBM`): the five esports
 /// presets and Custom. Game/Music/Movie (7/8/9) are fixed curves in the firmware.
 const WRITABLE_EQ_SLOTS: [u8; 6] = [250, 251, 252, 253, 254, 255];
+const CUSTOM_SLOT: u8 = 255;
 
 /// Band gain limit in dB. Synapse's speaker EQ slider for this model is -5…+5 in 1 dB steps.
 const EQ_RANGE_DB: i8 = 5;
@@ -44,6 +87,27 @@ const EQ_RANGE_DB: i8 = 5;
 /// Synapse's `useHardwareEqualizer` groups: esports presets are group 2, everything else group 1.
 fn eq_group(preset: u8) -> u8 {
     if (250..=254).contains(&preset) { 2 } else { 1 }
+}
+
+/// Frazer (and the UI) number EQ slots the BlackShark way; Mabel models store Game/Music/Movie
+/// at 1/2/3 and everything user-defined in Custom.
+fn mabel_slot(preset: u8) -> u8 {
+    match preset {
+        0 => 0,
+        7 => 1,
+        8 => 2,
+        9 => 3,
+        _ => CUSTOM_SLOT,
+    }
+}
+
+fn from_mabel_slot(slot: u8) -> u8 {
+    match slot {
+        1 => 7,
+        2 => 8,
+        3 => 9,
+        s => s,
+    }
 }
 
 /// Synapse maps the UI percentage onto the device's 0–15 sidetone scale.
@@ -57,6 +121,10 @@ pub fn sidetone_from_device(raw: u8) -> u8 {
 
 fn ascii(bytes: &[u8]) -> String {
     bytes.iter().filter(|b| (32..127).contains(*b)).map(|b| *b as char).collect()
+}
+
+fn raw_bands(bands: &[i8]) -> Vec<u8> {
+    bands.iter().map(|b| (*b).clamp(-EQ_RANGE_DB, EQ_RANGE_DB) as u8).collect()
 }
 
 impl<I: HidIo> HeadsetDriver for MxicHeadset<I> {
@@ -86,11 +154,18 @@ impl<I: HidIo> HeadsetDriver for MxicHeadset<I> {
 
     /// Reads each setting independently so one unsupported query doesn't hide the rest.
     fn settings(&mut self) -> Result<Settings> {
+        let odessa = self.eq == EqLayout::Odessa;
+        let alias = self.custom_alias;
         let c = &mut self.client;
+        let eq_preset = c.get_u8(cmd::EQ_PRESET).ok().map(|slot| match slot {
+            _ if odessa => slot,
+            CUSTOM_SLOT => alias.unwrap_or(CUSTOM_SLOT),
+            _ => from_mabel_slot(slot),
+        });
         Ok(Settings {
-            eq_enabled: c.get_u8(cmd::EQ_ENABLED).ok().map(|v| v == 1),
-            eq_group: c.get_u8(cmd::EQ_GROUP).ok(),
-            eq_preset: c.get_u8(cmd::EQ_PRESET).ok(),
+            eq_enabled: if odessa { c.get_u8(cmd::EQ_ENABLED).ok().map(|v| v == 1) } else { None },
+            eq_group: if odessa { c.get_u8(cmd::EQ_GROUP).ok() } else { None },
+            eq_preset,
             eq_bands: c.get(cmd::EQ_BANDS).ok().map(|b| b.into_iter().map(|v| v as i8).collect()),
             sidetone_enabled: c.get_u8(cmd::SIDETONE).ok().map(|v| v == 1),
             sidetone_level: c.get_u8(cmd::SIDETONE_VOLUME).ok().map(sidetone_from_device),
@@ -102,20 +177,34 @@ impl<I: HidIo> HeadsetDriver for MxicHeadset<I> {
         })
     }
 
-    /// Mirrors Synapse's `setThxV3AudioEqualizer`: select the slot, select its group, write bands
-    /// only to the user-writable slots, then make sure the hardware EQ is switched on (Synapse
-    /// leaves it off while its THX Spatial is active).
+    /// BlackShark: mirrors Synapse's `setThxV3AudioEqualizer`: select the slot, select its group,
+    /// write bands only to the user-writable slots, then make sure the hardware EQ is switched on
+    /// (Synapse leaves it off while its THX Spatial is active).
+    /// Barracuda: select the slot (`protocolAudioMabelT1.setPresetEQIndex`), and write bands when
+    /// it is Custom.
     fn set_eq(&mut self, preset: u8, bands: &[i8]) -> Result<()> {
         if bands.len() != 10 {
             return Err(format!("expected 10 EQ bands, got {}", bands.len()));
         }
-        self.client.set(cmd::SET_EQ_PRESET, &[preset])?;
-        self.client.set(cmd::SET_EQ_GROUP, &[eq_group(preset)])?;
-        if WRITABLE_EQ_SLOTS.contains(&preset) {
-            let raw: Vec<u8> = bands.iter().map(|b| (*b).clamp(-EQ_RANGE_DB, EQ_RANGE_DB) as u8).collect();
-            self.client.set(cmd::SET_EQ_BANDS, &raw)?;
+        match self.eq {
+            EqLayout::Odessa => {
+                self.client.set(cmd::SET_EQ_PRESET, &[preset])?;
+                self.client.set(cmd::SET_EQ_GROUP, &[eq_group(preset)])?;
+                if WRITABLE_EQ_SLOTS.contains(&preset) {
+                    self.client.set(cmd::SET_EQ_BANDS, &raw_bands(bands))?;
+                }
+                self.client.set(cmd::SET_EQ_ENABLED, &[1])
+            }
+            EqLayout::Mabel => {
+                let slot = mabel_slot(preset);
+                self.client.set(cmd::SET_EQ_PRESET, &[slot])?;
+                if slot == CUSTOM_SLOT {
+                    self.client.set(cmd::SET_EQ_BANDS, &raw_bands(bands))?;
+                }
+                self.custom_alias = (slot == CUSTOM_SLOT).then_some(preset);
+                Ok(())
+            }
         }
-        self.client.set(cmd::SET_EQ_ENABLED, &[1])
     }
 
     fn set_sidetone(&mut self, enabled: bool, level: u8) -> Result<()> {
@@ -142,17 +231,18 @@ mod tests {
     use crate::hid::mxic::{REPORT_ID, REPORT_LEN};
     use std::sync::{Arc, Mutex};
 
-    /// Acknowledges every setter and records the command code of each non-remote write.
+    /// Acknowledges every setter (standard framing) and records `(code, first data byte)` of each
+    /// non-remote write.
     #[derive(Clone, Default)]
     struct AckIo {
-        codes: Arc<Mutex<Vec<u8>>>,
+        writes: Arc<Mutex<Vec<(u8, u8)>>>,
         last: Option<u8>,
     }
 
     impl HidIo for AckIo {
         fn write(&mut self, buf: &[u8]) -> std::result::Result<usize, String> {
             if buf[7] == 0x08 {
-                self.codes.lock().unwrap().push(buf[10]);
+                self.writes.lock().unwrap().push((buf[10], buf[13]));
                 self.last = Some(buf[10]);
             }
             Ok(buf.len())
@@ -171,23 +261,49 @@ mod tests {
         }
     }
 
-    fn eq_commands(preset: u8) -> Vec<u8> {
+    fn eq_writes(model: MxicModel, preset: u8) -> Vec<(u8, u8)> {
         let io = AckIo::default();
-        let codes = io.codes.clone();
-        MxicHeadset::new("test", io).set_eq(preset, &[0; 10]).unwrap();
-        let v = codes.lock().unwrap().clone();
+        let writes = io.writes.clone();
+        MxicHeadset::new("test", io, model).set_eq(preset, &[0; 10]).unwrap();
+        let v = writes.lock().unwrap().clone();
         v
+    }
+
+    fn codes(writes: Vec<(u8, u8)>) -> Vec<u8> {
+        writes.into_iter().map(|(c, _)| c).collect()
     }
 
     #[test]
     fn eq_follows_synapse_order() {
         // index, group, bands (writable slot), enable
-        assert_eq!(eq_commands(255), vec![0x93, 0x9D, 0x95, 0x9E]);
-        assert_eq!(eq_commands(251), vec![0x93, 0x9D, 0x95, 0x9E]);
+        assert_eq!(codes(eq_writes(ODESSA, 255)), vec![0x93, 0x9D, 0x95, 0x9E]);
+        assert_eq!(codes(eq_writes(ODESSA, 251)), vec![0x93, 0x9D, 0x95, 0x9E]);
         // built-in Game/Music/Movie: no band write
-        assert_eq!(eq_commands(8), vec![0x93, 0x9D, 0x9E]);
+        assert_eq!(codes(eq_writes(ODESSA, 8)), vec![0x93, 0x9D, 0x9E]);
         assert_eq!(eq_group(252), 2);
         assert_eq!(eq_group(7), 1);
+    }
+
+    #[test]
+    fn mabel_eq_uses_its_own_slots_without_group_or_switch() {
+        // MABEL_ECR shares the standard framing, so AckIo can answer it.
+        assert_eq!(eq_writes(MABEL_ECR, 8), vec![(0x93, 2)]);
+        assert_eq!(eq_writes(MABEL_ECR, 255), vec![(0x93, 255), (0x95, 0)]);
+        assert_eq!(eq_writes(MABEL_ECR, 251), vec![(0x93, 255), (0x95, 0)]);
+        for p in [0, 7, 8, 9] {
+            assert_eq!(from_mabel_slot(mabel_slot(p)), p);
+        }
+    }
+
+    #[test]
+    fn events_are_read_from_the_model_report_id() {
+        let frame = [b'P', b'I', 0x08, 0, 0, 0, 0, 0, 0, 4, event::BATTERY, 2, 1, 42];
+        let mut r = vec![0x01, frame.len() as u8];
+        r.extend(frame);
+        assert_eq!(parse_events_report1(&r), vec![HeadsetEvent::Battery(42)]);
+        assert!(parse_events(&r).is_empty());
+        r[0] = 0x02;
+        assert_eq!(parse_events(&r), vec![HeadsetEvent::Battery(42)]);
     }
 
     #[test]

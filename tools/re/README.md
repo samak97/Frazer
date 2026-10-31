@@ -17,8 +17,12 @@ The cache lives at:
 %LOCALAPPDATA%\Razer\RazerAppEngine\User Data\Default\Service Worker\CacheStorage
 ```
 
+Razer's server also serves these bundles to anyone, so you can skip the cache and download them with `fetch-product.ts`.
+
 | Script | What it does |
 |---|---|
+| `fetch-product.ts <pid-decimal> <outDir>` | Downloads a product's whole bundle (main.js, manifest.json and every chunk) from Razer's server. No headset or Synapse needed. |
+| `fetch-product.ts --scan <fromHex> <toHex>` | Lists every product id in a range that has a bundle, with its dongle id, driver class, interface and name. |
 | `cache-index.ts <CacheStorage> [bodyRegex]` | Prints size, entry and URL for each cached response. Pipe it to `grep products/` to see the product ids Synapse has cached. |
 | `cache-extract.ts <CacheStorage> <urlRegex> <outDir>` | Writes the newest cached copy of each matching file, e.g. `'synapse/products/1365/mw/.*\.(js|json)'`. |
 | `webpack-dump.ts <out.json> <moduleIds> <chunk.js...>` | Runs only the webpack modules you name, with network access stubbed out, and dumps their exports. This turns minified constants into readable command bytes. |

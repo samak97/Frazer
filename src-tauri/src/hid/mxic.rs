@@ -54,30 +54,81 @@ pub mod cmd {
     pub const SET_MIC_MUTE: Set = Set(0xE9, 1);
 }
 
-/// Builds one 64-byte output report (report ID included).
-pub fn encode(header: &[u8], data: &[u8], remote: bool) -> [u8; REPORT_LEN] {
-    let len = header.len() + data.len();
-    let mut out = [0u8; REPORT_LEN];
-    out[0] = REPORT_ID;
-    out[1] = 0x80;
-    out[2] = (len + 5) as u8;
-    out[5] = b'P';
-    out[6] = b'A';
-    out[7] = if remote { TYPE_REMOTE } else { TYPE_RAZER };
-    out[9] = len as u8;
-    for (i, b) in header.iter().chain(data).enumerate().take(REPORT_LEN - 10) {
-        out[10 + i] = *b;
-    }
-    out
+/// How a model wraps commands in HID reports. Synapse's base `AudioMxicDevice` class (BlackShark V2
+/// Pro, Barracuda 2024) uses `Standard`; its `AudioMxicMabelT1` subclass (Barracuda 2022, Barracuda
+/// Pro 2022) uses `Mabel`. Command codes and reply headers are the same in both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Framing {
+    /// Report 0x02: `02 80 len+5 00 00 'P' 'A' type 00 len` + data. Replies come on report 0x02 with
+    /// the frame length at [1], and each command is acknowledged through GET_REPORT (status 0x4F).
+    Standard,
+    /// Report 0x01: `01 80 len+5 'P' 'A' type 08 len` + data. Replies come on report 0x01 with the
+    /// frame length at [2]; there is no GET_REPORT acknowledgement.
+    Mabel,
 }
 
-/// Splits an input report into its "PI" sub-frames and returns each frame's data.
-pub fn parse_frames(report: &[u8]) -> Vec<Vec<u8>> {
+impl Framing {
+    pub fn report_id(self) -> u8 {
+        match self {
+            Framing::Standard => REPORT_ID,
+            Framing::Mabel => 0x01,
+        }
+    }
+
+    /// Builds one 64-byte output report (report ID included).
+    pub fn encode(self, header: &[u8], data: &[u8], remote: bool) -> [u8; REPORT_LEN] {
+        let len = header.len() + data.len();
+        let mut out = [0u8; REPORT_LEN];
+        out[0] = self.report_id();
+        out[1] = 0x80;
+        out[2] = (len + 5) as u8;
+        let body = match self {
+            Framing::Standard => {
+                out[5..9].copy_from_slice(&[b'P', b'A', if remote { TYPE_REMOTE } else { TYPE_RAZER }, 0]);
+                out[9] = len as u8;
+                10
+            }
+            Framing::Mabel => {
+                out[3..7].copy_from_slice(&[b'P', b'A', if remote { TYPE_REMOTE } else { TYPE_RAZER }, 0x08]);
+                out[7] = len as u8;
+                8
+            }
+        };
+        for (i, b) in header.iter().chain(data).enumerate().take(REPORT_LEN - body) {
+            out[body + i] = *b;
+        }
+        out
+    }
+
+    /// Splits a reply report into its "PI" sub-frames and returns each frame's data.
+    pub fn parse_frames(self, report: &[u8]) -> Vec<Vec<u8>> {
+        let len_at = match self {
+            Framing::Standard => 1,
+            Framing::Mabel => 2,
+        };
+        frames(report, self.report_id(), len_at)
+    }
+
+    /// Returns the value bytes of the frame whose data starts with `expected` header.
+    pub fn find_reply(self, report: &[u8], expected: &[u8]) -> Option<Vec<u8>> {
+        self.parse_frames(report)
+            .into_iter()
+            .find(|d| d.starts_with(expected))
+            .map(|d| d[expected.len()..].to_vec())
+    }
+
+    fn acknowledges(self) -> bool {
+        self == Framing::Standard
+    }
+}
+
+/// "PI" sub-frames of `report`; the byte at `len_at` holds their total length and they start right after.
+fn frames(report: &[u8], report_id: u8, len_at: usize) -> Vec<Vec<u8>> {
     let mut frames = Vec::new();
-    if report.len() < 2 || report[0] != REPORT_ID || report[1] as usize + 2 > report.len() {
+    if report.len() <= len_at || report[0] != report_id || report[len_at] as usize + len_at + 1 > report.len() {
         return frames;
     }
-    let mut rest = &report[2..];
+    let mut rest = &report[len_at + 1..];
     while rest.len() >= 10 && rest[0] == b'P' && rest[1] == b'I' {
         let len = ((rest[8] as usize) << 8) | rest[9] as usize;
         let end = (10 + len).min(rest.len());
@@ -87,19 +138,11 @@ pub fn parse_frames(report: &[u8]) -> Vec<Vec<u8>> {
     frames
 }
 
-/// Returns the value bytes of the frame whose data starts with `expected` header.
-pub fn find_reply(report: &[u8], expected: &[u8]) -> Option<Vec<u8>> {
-    parse_frames(report)
-        .into_iter()
-        .find(|d| d.starts_with(expected))
-        .map(|d| d[expected.len()..].to_vec())
-}
-
 /// Unsolicited notifications in an input report, as `(record id, payload)`. The headset sends
-/// these on its own (EQ button, power, battery, mic button); they share the "PI" framing with
-/// replies but carry `0x02` instead of `0x01` in the second data byte.
-pub fn parse_events(report: &[u8]) -> Vec<(u8, Vec<u8>)> {
-    parse_frames(report)
+/// these on its own (EQ button, power, battery, mic button); they use the standard "PI" layout on
+/// `report_id` and carry `0x02` instead of `0x01` in the second data byte.
+pub fn parse_events(report: &[u8], report_id: u8) -> Vec<(u8, Vec<u8>)> {
+    frames(report, report_id, 1)
         .into_iter()
         .filter(|d| d.len() >= 3 && d[1] == 2)
         .map(|d| (d[0], d[3..].to_vec()))
@@ -124,16 +167,17 @@ pub trait HidIo: Send {
 
 pub struct MxicClient<I: HidIo> {
     io: I,
+    framing: Framing,
 }
 
 impl<I: HidIo> MxicClient<I> {
-    pub fn new(io: I) -> Self {
-        Self { io }
+    pub fn new(io: I, framing: Framing) -> Self {
+        Self { io, framing }
     }
 
     pub fn get(&mut self, c: Get) -> Result<Vec<u8>, String> {
         self.set_remote_mode()?;
-        let reply = self.transact(&encode(&[c.0, 0, 0], &[], false), Some(&[c.0, 1, c.1]))?;
+        let reply = self.transact(&self.framing.encode(&[c.0, 0, 0], &[], false), Some(&[c.0, 1, c.1]))?;
         Ok(reply.into_iter().take(c.1 as usize).collect())
     }
 
@@ -146,13 +190,13 @@ impl<I: HidIo> MxicClient<I> {
             return Err(format!("command 0x{:02X} takes {} bytes, got {}", c.0, c.1, data.len()));
         }
         self.set_remote_mode()?;
-        self.transact(&encode(&[c.0, 0, c.1], data, false), Some(&[c.0, 1, 1]))?;
+        self.transact(&self.framing.encode(&[c.0, 0, c.1], data, false), Some(&[c.0, 1, 1]))?;
         Ok(())
     }
 
     /// Synapse switches the dongle to remote (host-controlled) mode before every command.
     fn set_remote_mode(&mut self) -> Result<(), String> {
-        self.transact(&encode(&[cmd::REMOTE_SET], &[1], true), None).map(|_| ())
+        self.transact(&self.framing.encode(&[cmd::REMOTE_SET], &[1], true), None).map(|_| ())
     }
 
     fn transact(&mut self, report: &[u8; REPORT_LEN], expect: Option<&[u8]>) -> Result<Vec<u8>, String> {
@@ -193,6 +237,9 @@ impl<I: HidIo> MxicClient<I> {
 
     /// The status flag sits at [0] if the report ID is stripped, [1] if it is kept.
     fn accepted(&mut self) -> Result<bool, String> {
+        if !self.framing.acknowledges() {
+            return Ok(true);
+        }
         let mut buf = [0u8; REPORT_LEN];
         buf[0] = REPORT_ID;
         let n = self.io.get_input_report(&mut buf)?;
@@ -212,7 +259,7 @@ impl<I: HidIo> MxicClient<I> {
                 continue;
             }
             empty = 0;
-            if let Some(value) = find_reply(&buf[..n], expected) {
+            if let Some(value) = self.framing.find_reply(&buf[..n], expected) {
                 return Ok(Some(value));
             }
         }
@@ -226,12 +273,27 @@ mod tests {
     use std::collections::VecDeque;
 
     fn reply(header: &[u8], value: &[u8]) -> Vec<u8> {
+        let mut r = vec![REPORT_ID];
+        r.extend(sized_frame(header, value));
+        r.resize(REPORT_LEN, 0);
+        r
+    }
+
+    /// Mabel replies carry one extra byte before the length: `01 ?? len 'P' 'I' …`.
+    fn mabel_reply(header: &[u8], value: &[u8]) -> Vec<u8> {
+        let mut r = vec![0x01, 0x00];
+        r.extend(sized_frame(header, value));
+        r.resize(REPORT_LEN, 0);
+        r
+    }
+
+    /// `len` followed by one "PI" frame carrying `header` + `value`.
+    fn sized_frame(header: &[u8], value: &[u8]) -> Vec<u8> {
         let data: Vec<u8> = header.iter().chain(value).copied().collect();
         let mut frame = vec![b'P', b'I', TYPE_RAZER, 0, 0, 0, 0, 0, 0, data.len() as u8];
         frame.extend(&data);
-        let mut r = vec![REPORT_ID, frame.len() as u8];
+        let mut r = vec![frame.len() as u8];
         r.extend(frame);
-        r.resize(REPORT_LEN, 0);
         r
     }
 
@@ -239,6 +301,7 @@ mod tests {
     struct FakeIo {
         writes: Vec<Vec<u8>>,
         reads: VecDeque<Vec<u8>>,
+        status_polls: usize,
     }
 
     impl HidIo for FakeIo {
@@ -247,6 +310,7 @@ mod tests {
             Ok(buf.len())
         }
         fn get_input_report(&mut self, buf: &mut [u8]) -> Result<usize, String> {
+            self.status_polls += 1;
             buf[1] = STATUS_OK;
             Ok(REPORT_LEN)
         }
@@ -268,21 +332,21 @@ mod tests {
 
     #[test]
     fn encodes_battery_request() {
-        let r = encode(&[0x21, 0, 0], &[], false);
+        let r = Framing::Standard.encode(&[0x21, 0, 0], &[], false);
         assert_eq!(&r[..13], &[0x02, 0x80, 0x08, 0, 0, b'P', b'A', 0x08, 0, 0x03, 0x21, 0, 0]);
         assert!(r[13..].iter().all(|b| *b == 0));
     }
 
     #[test]
     fn encodes_remote_mode_request() {
-        let r = encode(&[cmd::REMOTE_SET], &[1], true);
+        let r = Framing::Standard.encode(&[cmd::REMOTE_SET], &[1], true);
         assert_eq!(&r[..12], &[0x02, 0x80, 0x07, 0, 0, b'P', b'A', 0x0E, 0, 0x02, 0xE1, 0x01]);
     }
 
     #[test]
     fn encodes_eq_bands_as_signed_bytes() {
         let bands: Vec<u8> = [-3i8, -3, -4, 0, 5, 5, 4, 1, 0, -1].iter().map(|b| *b as u8).collect();
-        let r = encode(&[0x95, 0, 10], &bands, false);
+        let r = Framing::Standard.encode(&[0x95, 0, 10], &bands, false);
         assert_eq!(r[2], 18);
         assert_eq!(r[9], 13);
         assert_eq!(&r[10..23], &[0x95, 0, 10, 0xFD, 0xFD, 0xFC, 0, 5, 5, 4, 1, 0, 0xFF]);
@@ -291,10 +355,10 @@ mod tests {
     #[test]
     fn finds_reply_among_frames_and_ignores_others() {
         let mut r = reply(&[0x13, 1, 1], &[7]);
-        assert_eq!(find_reply(&r, &[0x21, 1, 1]), None);
-        assert_eq!(find_reply(&r, &[0x13, 1, 1]), Some(vec![7]));
+        assert_eq!(Framing::Standard.find_reply(&r, &[0x21, 1, 1]), None);
+        assert_eq!(Framing::Standard.find_reply(&r, &[0x13, 1, 1]), Some(vec![7]));
         r[2] = b'X';
-        assert!(parse_frames(&r).is_empty());
+        assert!(Framing::Standard.parse_frames(&r).is_empty());
     }
 
     #[test]
@@ -302,7 +366,7 @@ mod tests {
         let mut io = FakeIo::default();
         io.reads.push_back(reply(&[0x55, 1, 1], &[1])); // unrelated event first
         io.reads.push_back(reply(&[0x21, 1, 1], &[83]));
-        let mut c = MxicClient::new(io);
+        let mut c = MxicClient::new(io, Framing::Standard);
         assert_eq!(c.get_u8(cmd::BATTERY), Ok(83));
         assert_eq!(c.io.writes.len(), 2);
         assert_eq!(c.io.writes[0][10], cmd::REMOTE_SET);
@@ -313,13 +377,35 @@ mod tests {
     fn parses_notify_frames_but_not_replies() {
         // EQ button press: record 0x13, notify flag 2, payload len 1, new slot 8
         let notify = reply(&[event::PRESET_EQ_INDEX, 2, 1], &[8]);
-        assert_eq!(parse_events(&notify), vec![(event::PRESET_EQ_INDEX, vec![8])]);
-        assert!(parse_events(&reply(&[0x13, 1, 1], &[8])).is_empty());
+        assert_eq!(parse_events(&notify, REPORT_ID), vec![(event::PRESET_EQ_INDEX, vec![8])]);
+        assert!(parse_events(&notify, 0x01).is_empty());
+        assert!(parse_events(&reply(&[0x13, 1, 1], &[8]), REPORT_ID).is_empty());
+    }
+
+    #[test]
+    fn encodes_mabel_requests_like_synapse() {
+        // AudioMxicMabelT1._createDataSend: [1, 0x80, n+5, 'P', 'A', type, 8, n, data…]
+        let r = Framing::Mabel.encode(&[0x21, 0, 0], &[], false);
+        assert_eq!(&r[..11], &[0x01, 0x80, 0x08, b'P', b'A', 0x08, 0x08, 0x03, 0x21, 0, 0]);
+        assert!(r[11..].iter().all(|b| *b == 0));
+        let r = Framing::Mabel.encode(&[cmd::REMOTE_SET], &[1], true);
+        assert_eq!(&r[..10], &[0x01, 0x80, 0x07, b'P', b'A', 0x0E, 0x08, 0x02, 0xE1, 0x01]);
+    }
+
+    #[test]
+    fn mabel_reads_replies_without_status_poll() {
+        let mut io = FakeIo::default();
+        io.reads.push_back(reply(&[0x21, 1, 1], &[50])); // standard-framed: not a Mabel reply
+        io.reads.push_back(mabel_reply(&[0x21, 1, 1], &[64]));
+        let mut c = MxicClient::new(io, Framing::Mabel);
+        assert_eq!(c.get_u8(cmd::BATTERY), Ok(64));
+        assert_eq!(c.io.status_polls, 0);
+        assert_eq!(&c.io.writes[1][8..11], &[0x21, 0, 0]);
     }
 
     #[test]
     fn set_rejects_wrong_length() {
-        let mut c = MxicClient::new(FakeIo::default());
+        let mut c = MxicClient::new(FakeIo::default(), Framing::Standard);
         assert!(c.set(cmd::SET_EQ_BANDS, &[0; 3]).is_err());
     }
 }
