@@ -1,11 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { motion } from 'framer-motion';
-import { Mic, MicOff, VolumeX, Ear, SlidersHorizontal, Power, RefreshCw, BatteryCharging, Wifi } from 'lucide-react';
+import { Mic, MicOff, VolumeX, Ear, SlidersHorizontal, Power, RefreshCw, BatteryCharging, Wifi, MessageSquarePlus } from 'lucide-react';
 import { useAudioStore } from '../../stores/audioStore';
 import { CUSTOM_EQ_INDEX, EQ_PRESETS, RECOMMENDED_EQ, useHeadsetStore } from '../../stores/headsetStore';
 import { useUIStore } from '../../stores/uiStore';
 import { Page, item } from '../common/Page';
 import logo from '../../assets/logo.svg';
+import { deviceName, supportRequestUrl, unsupportedDevice, usbId } from '../../utils/deviceSupport';
 
 const RING = 2 * Math.PI * 70;
 
@@ -69,10 +72,15 @@ function eqName(preset: number | null | undefined, bands: number[] | null | unde
 }
 
 export const Dashboard = () => {
-  const { headsets, headsetsLoaded, fetchHeadsets, toggleMasterMute } = useAudioStore();
+  const { headsets, headsetsLoaded, detected, fetchHeadsets, toggleMasterMute } = useAudioStore();
   const { settings, loadSettings, setMicMute } = useHeadsetStore();
   const setActiveTab = useUIStore((s) => s.setActiveTab);
   const headset = headsets[0];
+  const other = headset ? undefined : unsupportedDevice(detected);
+  const [version, setVersion] = useState('');
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetchHeadsets();
@@ -106,10 +114,32 @@ export const Dashboard = () => {
           <div className="flex items-center gap-2 text-sm">
             <span className={`w-2 h-2 rounded-full ${headset?.is_connected ? 'bg-mint shadow-[0_0_12px_#3df5b0]' : 'bg-fg-dim'}`} />
             <span className="text-fg-muted">
-              {!headset ? 'Plug in the HyperSpeed dongle' : headset.is_connected ? 'Connected' : 'Dongle found, headset is off'}
+              {headset
+                ? headset.is_connected ? 'Connected' : 'Dongle found, headset is off'
+                : !other ? 'Plug in the HyperSpeed dongle'
+                : other.status === 'identifying' ? 'Identifying your Razer device…'
+                : other.status === 'unsupported' ? 'Detected, not supported yet'
+                : 'Razer device found, but it could not be identified'}
             </span>
           </div>
-          <h2 className="text-3xl font-semibold tracking-tight mt-2">{headset?.name ?? 'No headset'}</h2>
+          <h2 className="text-3xl font-semibold tracking-tight mt-2">{headset?.name ?? (other ? deviceName(other) : 'No headset')}</h2>
+          {other && other.status !== 'identifying' && (
+            <div className="mt-3 space-y-3">
+              <p className="text-sm text-fg-muted max-w-lg">
+                {other.status === 'unsupported'
+                  ? "Frazer doesn't support this headset's chip yet. Send a support request so it can be added, usually together with the rest of its family."
+                  : "This may be an older model, or Frazer couldn't reach Razer's server to identify it. A support request with its USB ID helps add it."}
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <button onClick={() => openUrl(supportRequestUrl(other, version))} className="chip chip-active flex items-center gap-2">
+                  <MessageSquarePlus size={14} /> Request support
+                </button>
+                <span className="text-xs text-fg-dim">
+                  USB {usbId(other.pid)}{other.family ? ' · ' + other.family : ''}
+                </span>
+              </div>
+            </div>
+          )}
           {headset && (
             <div className="flex items-center gap-2 mt-3 text-sm text-fg-muted">
               <Wifi size={15} /> {headset.connection_type}

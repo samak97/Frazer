@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import {
+  DetectedDevice,
   getConnectedHeadsets,
+  getDetectedDevices,
+  onDetectedDevicesChanged,
   onDeviceChange,
   HeadsetInfo
 } from '../utils/tauri-bridge';
@@ -21,6 +24,8 @@ interface AudioState {
   sessions: AudioSession[];
   headsets: HeadsetInfo[];
   headsetsLoaded: boolean;
+  /** Razer audio devices plugged in, supported or not. */
+  detected: DetectedDevice[];
 
   fetchSessions: () => Promise<void>;
   fetchHeadsets: () => Promise<void>;
@@ -33,6 +38,7 @@ export const useAudioStore = create<AudioState>((set, get) => ({
   sessions: [],
   headsets: [],
   headsetsLoaded: false,
+  detected: [],
 
   fetchSessions: async () => {
     try {
@@ -44,8 +50,8 @@ export const useAudioStore = create<AudioState>((set, get) => ({
   },
 
   fetchHeadsets: async () => {
-    const headsets = await getConnectedHeadsets();
-    set({ headsets, headsetsLoaded: true });
+    const [headsets, detected] = await Promise.all([getConnectedHeadsets(), getDetectedDevices()]);
+    set({ headsets, detected, headsetsLoaded: true });
   },
 
   updateSessionVolume: async (id, volume) => {
@@ -82,4 +88,8 @@ export const useAudioStore = create<AudioState>((set, get) => ({
 
 onDeviceChange((headsets) => {
   useAudioStore.setState({ headsets, headsetsLoaded: true });
+});
+
+onDetectedDevicesChanged((detected) => {
+  useAudioStore.setState({ detected });
 });

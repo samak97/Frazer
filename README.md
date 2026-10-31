@@ -64,7 +64,11 @@ Frazer talks to the headset **directly over USB**, using the same commands Synap
 
 🧪 The Barracuda models were added from Synapse's own code ([protocol notes](docs/protocol/barracuda.md)) and are still being tested on real hardware. Battery and settings should work; whether the custom EQ is audible is not confirmed yet. The Barracuda has no EQ button.
 
-Other Razer headsets built on the same chip family can be added with a one-line registry entry. See [docs/adding-a-device.md](docs/adding-a-device.md); contributions from owners of other models are welcome.
+**Other Razer headsets:** Frazer identifies any Razer headset you plug in, using the product data Razer's own servers publish for Synapse:
+- If the headset uses a chip family Frazer already supports, it works right away, without an update.
+- Otherwise the dashboard shows the model with a **Request support** button. It opens a GitHub issue with the details already filled in, and adding one chip family usually covers several headsets.
+
+Frazer sends Razer's server only the USB ID of the Razer devices you plug in, once per device, and caches the answer. See [docs/adding-a-device.md](docs/adding-a-device.md) to add a family yourself.
 
 ## Install
 

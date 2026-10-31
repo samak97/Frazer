@@ -2,6 +2,7 @@ import { motion } from 'framer-motion';
 import { Activity, SlidersHorizontal, Volume2, Mic2, Settings2, Layers, Info, BatteryCharging, BatteryMedium } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 import { useAudioStore } from '../../stores/audioStore';
+import { deviceName, unsupportedDevice } from '../../utils/deviceSupport';
 
 const NAV = [
   { id: 'dashboard', icon: Activity, label: 'Dashboard' },
@@ -41,6 +42,7 @@ const NavItem = ({ id, icon: Icon, label }: (typeof NAV)[number]) => {
 /** Live headset status at the bottom of the sidebar. */
 const HeadsetChip = () => {
   const headset = useAudioStore((s) => s.headsets[0]);
+  const other = useAudioStore((s) => (s.headsets[0] ? undefined : unsupportedDevice(s.detected)));
   const battery = headset?.battery_level;
   const Icon = headset?.is_charging ? BatteryCharging : BatteryMedium;
   const online = !!headset?.is_connected;
@@ -52,8 +54,11 @@ const HeadsetChip = () => {
           {online && <span className="absolute inset-0 rounded-full bg-mint animate-ping opacity-60" />}
           <span className={`relative w-2 h-2 rounded-full ${online ? 'bg-mint' : 'bg-fg-dim'}`} />
         </span>
-        <span className="text-fg-muted truncate">{headset ? (online ? 'Connected' : 'Headset off') : 'No headset'}</span>
+        <span className="text-fg-muted truncate">
+          {headset ? (online ? 'Connected' : 'Headset off') : other?.status === 'unsupported' ? 'Not supported yet' : 'No headset'}
+        </span>
       </div>
+      {other?.status === 'unsupported' && <p className="text-sm font-semibold mt-2 truncate">{deviceName(other).replace('Razer ', '')}</p>}
       {headset && (
         <>
           <p className="text-sm font-semibold mt-2 truncate">{headset.name.replace('Razer ', '')}</p>

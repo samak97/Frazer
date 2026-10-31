@@ -32,8 +32,9 @@ pub const MABEL: MxicModel = MxicModel { framing: Framing::Mabel, event_report_i
 /// Barracuda / Barracuda Pro, 2024 revision (`AudioMxicMabelT1_ecr`: base framing, events on report 1).
 pub const MABEL_ECR: MxicModel = MxicModel { framing: Framing::Standard, event_report_id: 0x01, eq: EqLayout::Mabel };
 
-/// Maps MXIC notify frames (Synapse's `rzHardwareEventsAudioMxicParser`) to headset events.
-fn events(report: &[u8], report_id: u8) -> Vec<HeadsetEvent> {
+/// Maps MXIC notify frames (Synapse's `rzHardwareEventsAudioMxicParser`) on the model's
+/// `event_report_id` to headset events.
+pub fn parse_events(report: &[u8], report_id: u8) -> Vec<HeadsetEvent> {
     parse_frames(report, report_id)
         .into_iter()
         .filter_map(|(record, payload)| {
@@ -51,18 +52,8 @@ fn events(report: &[u8], report_id: u8) -> Vec<HeadsetEvent> {
         .collect()
 }
 
-/// Notifications from models that send them on report 2 (`ODESSA`, `MABEL`).
-pub fn parse_events(report: &[u8]) -> Vec<HeadsetEvent> {
-    events(report, ODESSA.event_report_id)
-}
-
-/// Notifications from `MABEL_ECR` models.
-pub fn parse_events_report1(report: &[u8]) -> Vec<HeadsetEvent> {
-    events(report, MABEL_ECR.event_report_id)
-}
-
 pub struct MxicHeadset<I: HidIo> {
-    name: &'static str,
+    name: String,
     client: MxicClient<I>,
     eq: EqLayout,
     /// Mabel models have one writable slot, so Frazer's esports slots (250–254) are all stored in
@@ -71,7 +62,7 @@ pub struct MxicHeadset<I: HidIo> {
 }
 
 impl<I: HidIo> MxicHeadset<I> {
-    pub fn new(name: &'static str, io: I, model: MxicModel) -> Self {
+    pub fn new(name: String, io: I, model: MxicModel) -> Self {
         Self { name, client: MxicClient::new(io, model.framing), eq: model.eq, custom_alias: None }
     }
 }
@@ -129,7 +120,7 @@ fn raw_bands(bands: &[i8]) -> Vec<u8> {
 
 impl<I: HidIo> HeadsetDriver for MxicHeadset<I> {
     fn name(&self) -> &str {
-        self.name
+        &self.name
     }
 
     fn connection(&self) -> &str {
@@ -264,7 +255,7 @@ mod tests {
     fn eq_writes(model: MxicModel, preset: u8) -> Vec<(u8, u8)> {
         let io = AckIo::default();
         let writes = io.writes.clone();
-        MxicHeadset::new("test", io, model).set_eq(preset, &[0; 10]).unwrap();
+        MxicHeadset::new("test".into(), io, model).set_eq(preset, &[0; 10]).unwrap();
         let v = writes.lock().unwrap().clone();
         v
     }
@@ -300,10 +291,10 @@ mod tests {
         let frame = [b'P', b'I', 0x08, 0, 0, 0, 0, 0, 0, 4, event::BATTERY, 2, 1, 42];
         let mut r = vec![0x01, frame.len() as u8];
         r.extend(frame);
-        assert_eq!(parse_events_report1(&r), vec![HeadsetEvent::Battery(42)]);
-        assert!(parse_events(&r).is_empty());
+        assert_eq!(parse_events(&r, MABEL_ECR.event_report_id), vec![HeadsetEvent::Battery(42)]);
+        assert!(parse_events(&r, MABEL.event_report_id).is_empty());
         r[0] = 0x02;
-        assert_eq!(parse_events(&r), vec![HeadsetEvent::Battery(42)]);
+        assert_eq!(parse_events(&r, MABEL.event_report_id), vec![HeadsetEvent::Battery(42)]);
     }
 
     #[test]

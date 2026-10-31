@@ -1,5 +1,11 @@
 # Adding a friend's Razer headset
 
+**Most of this happens automatically.** When a Razer device is plugged in, Frazer looks up its USB ID on Razer's server (`src-tauri/src/hid/catalog.rs`) and caches the result in `%APPDATA%\com.frazer.app\catalog.json`.
+- If Synapse's driver class for it maps to a family in `Family::from_synapse` (`src-tauri/src/hid/registry.rs`), Frazer drives it with no code change.
+- If not, the dashboard names the model and offers **Request support**. That opens a GitHub issue with the USB ID, interfaces and Synapse driver class.
+
+The steps below are for that second case: adding a new family, or a subclass of a known one.
+
 Frazer talks to a headset with the same commands Synapse 4 uses. Synapse downloads those commands per product from Razer's server, so adding a model means fetching them once. You don't need the headset for that; only the final check runs on real hardware.
 
 ```
@@ -46,22 +52,13 @@ grep -o 'productId:<pid>,\(dongleId:[0-9]*,\)\?vendorId:5426' out/<pid>/main.js
 
 The `{...}` after the class can name a subclass in `rzDeviceName`, for example `AudioMxicMabelT1`. That subclass lives in `out/<pid>/<rzDeviceName>.js` and overrides a few methods of the base class.
 
-- **`AudioMxicDevice`:** the protocol is already implemented. Add an entry to `DEVICES` in [`src-tauri/src/hid/registry.rs`](../src-tauri/src/hid/registry.rs), using the dongle's PID:
+- **`AudioMxicDevice`:** the protocol is already implemented. With no subclass, or with `AudioMxicMabelT1` or `AudioMxicMabelT1_ecr`, the catalog picks the model up automatically. To make a model work offline too, add it to `builtin()` in [`src-tauri/src/hid/registry.rs`](../src-tauri/src/hid/registry.rs), using the dongle's PID.
 
-  ```rust
-  DeviceEntry { pid: 0x0xxx, name: "Razer …", interface: <claimInterface>, open: open_odessa, parse_events: mxic_headset::parse_events },
-  ```
-
-  Pick the model by `rzDeviceName`:
-  - none → `open_odessa`
-  - `AudioMxicMabelT1` → `open_mabel`
-  - `AudioMxicMabelT1_ecr` → `open_mabel_ecr`, with `parse_events_report1`
-
-  For any other subclass, compare its `_createDataSend`, `_parseMxicResponse`, `REPORT_ID` and EQ preset table with [`docs/protocol/barracuda.md`](protocol/barracuda.md), and add an `MxicModel` for it.
+  For any other subclass, compare its `_createDataSend`, `_parseMxicResponse`, `REPORT_ID` and EQ preset table with [`docs/protocol/barracuda.md`](protocol/barracuda.md), then add an `MxicModel` for it and an arm in `Family::from_synapse`.
 
   Not every MXIC model has every feature. Check the `useFeature(...)` list in `main.js`; for example, no `useHardwareEqualizer` means Synapse doesn't use the on-device EQ. The UI hides controls for any setting the headset fails to read.
 
-- **Any other class** (for example `AudioBillieT1Dongle`, `AudioAvneraDevice`, `rzDevice25`): read `out/<pid>/<Class>.js` the same way as [`docs/protocol/blackshark-v2-pro.md`](protocol/blackshark-v2-pro.md). Dump its command module with `webpack-dump.ts`, write `src-tauri/src/hid/drivers/<family>.rs` implementing `HeadsetDriver`, then add the registry entry.
+- **Any other class** (for example `AudioBillieT1Dongle`, `AudioAvneraDevice`, `rzDevice25`): read `out/<pid>/<Class>.js` the same way as [`docs/protocol/blackshark-v2-pro.md`](protocol/blackshark-v2-pro.md). Dump its command module with `webpack-dump.ts`, write `src-tauri/src/hid/drivers/<family>.rs` implementing `HeadsetDriver`, then add a `Family` variant (with `open` and `parse_events` arms) and map its Synapse class in `Family::from_synapse`. Every headset of that class then works automatically.
 
 ## 4. Verify on hardware
 

@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod config;
+pub mod detect;
 pub mod hid;
 pub mod overlay;
 pub mod synapse;
@@ -16,6 +17,8 @@ use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use audio::{get_audio_devices, get_audio_sessions, set_session_mute, set_session_volume, toggle_master_mute, AudioDevice, AudioSession};
 use config::{AppConfig, ConfigStore, EqSetting};
 use hid::driver::{Capabilities, HeadsetEvent, Settings};
+use detect::{DetectedDevice, Detector};
+use hid::catalog::Catalog;
 use hid::HeadsetManager;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -44,6 +47,7 @@ pub struct HeadsetInfo {
 pub struct AppState {
     headsets: Arc<HeadsetManager>,
     config: ConfigStore,
+    detector: Arc<Detector>,
     /// Slot and time of Frazer's last EQ write, to tell its echo apart from a button press.
     last_host_eq: Mutex<Option<(u8, Instant)>>,
 }
@@ -92,6 +96,12 @@ fn read_headsets(mgr: &HeadsetManager) -> Vec<HeadsetInfo> {
 #[tauri::command]
 async fn get_connected_headsets(app: App<'_>) -> Result<Vec<HeadsetInfo>, String> {
     Ok(read_headsets(&app.headsets))
+}
+
+/// Every Razer audio device plugged in, supported or not, so the UI can name the model.
+#[tauri::command]
+fn get_detected_devices(app: App<'_>) -> Vec<DetectedDevice> {
+    app.detector.list()
 }
 
 #[tauri::command]
@@ -301,6 +311,9 @@ fn spawn_device_service(app: AppHandle, state: Arc<AppState>) {
             }
 
             let present = state.headsets.refresh();
+            if let Some(list) = state.detector.update(&state.headsets) {
+                let _ = app.emit("detected-devices-changed", list);
+            }
             if was_present != Some(present) {
                 was_present = Some(present);
                 stream = None;
@@ -370,6 +383,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             get_connected_headsets,
+            get_detected_devices,
             get_headset_settings,
             set_headset_eq,
             set_headset_sidetone,
@@ -400,9 +414,12 @@ pub fn run() {
         .setup(move |app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
+            let detector = Arc::new(Detector::new(Catalog::load(dir.join("catalog.json"))));
+            headsets.set_catalog_entries(detector.catalog_entries());
             let state = Arc::new(AppState {
                 headsets,
                 config: ConfigStore::load(dir.join("config.json")),
+                detector,
                 last_host_eq: Mutex::new(None),
             });
             app.manage(state.clone());

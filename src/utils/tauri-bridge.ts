@@ -36,6 +36,28 @@ export interface HeadsetSettings {
   serial: string | null;
 }
 
+/** A Razer audio device that's plugged in, identified from Razer's product data. */
+export interface DetectedDevice {
+  pid: number;
+  interfaces: number[];
+  name: string | null;
+  /** Synapse's driver class (and subclass), e.g. "AudioMxicDevice / AudioMxicMabelT1". */
+  family: string | null;
+  status: "supported" | "unsupported" | "identifying" | "unidentified";
+}
+
+export const getDetectedDevices = async (): Promise<DetectedDevice[]> => {
+  try {
+    return await invoke<DetectedDevice[]>("get_detected_devices");
+  } catch (error) {
+    console.error("Failed to fetch detected devices:", error);
+    return [];
+  }
+};
+
+export const onDetectedDevicesChanged = (callback: (devices: DetectedDevice[]) => void) =>
+  listen<DetectedDevice[]>("detected-devices-changed", (e) => callback(e.payload));
+
 export const getConnectedHeadsets = async (): Promise<HeadsetInfo[]> => {
   try {
     return await invoke<HeadsetInfo[]>("get_connected_headsets");
