@@ -62,6 +62,21 @@ export const setHeadsetEq = (preset: number, bands: number[], name: string | nul
   invoke("set_headset_eq", { preset, bands, name });
 export const getAppConfig = () => invoke<AppConfig>("get_app_config");
 export const setButtonCycle = (cycle: EqSetting[]) => invoke("set_button_cycle", { cycle });
+export interface SynapseStatus {
+  running: boolean;
+  autostart: boolean;
+}
+
+export const getSynapseStatus = () => invoke<SynapseStatus>("get_synapse_status");
+export const stopSynapse = () => invoke<SynapseStatus>("stop_synapse");
+export const setSynapseAutostart = (enabled: boolean) => invoke<SynapseStatus>("set_synapse_autostart", { enabled });
+export const onSynapseChanged = (callback: (s: SynapseStatus) => void) =>
+  listen<SynapseStatus>("synapse-changed", (e) => callback(e.payload));
+
+/** Fired when Frazer applied an EQ on its own: EQ button press or reconnect restore. */
+export const onEqApplied = (callback: (e: { name: string | null; source: "button" | "restore" }) => void) =>
+  listen<{ name: string | null; source: "button" | "restore" }>("eq-applied", (e) => callback(e.payload));
+
 /** Fired when the headset changed something itself (EQ button, mic button, power). */
 export const onHeadsetSettingsChanged = (callback: () => void) => listen("headset-settings-changed", () => callback());
 export const setHeadsetSidetone = (enabled: boolean, level: number) => invoke("set_headset_sidetone", { enabled, level });

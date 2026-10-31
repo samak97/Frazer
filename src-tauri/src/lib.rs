@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod config;
 pub mod hid;
+pub mod synapse;
 
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -22,6 +23,9 @@ const EVENT_READ_MS: i32 = 250;
 const EQ_ECHO_WINDOW: Duration = Duration::from_secs(2);
 /// Give the wireless link a moment after power-on before writing settings.
 const RECONNECT_SETTLE: Duration = Duration::from_millis(1200);
+/// After restoring, re-read the EQ this much later in case the firmware loaded its own slot.
+const RESTORE_VERIFY_DELAY: Duration = Duration::from_secs(3);
+const RESTORE_ATTEMPTS: usize = 3;
 const SILENT_ARG: &str = "--silent";
 
 #[derive(Serialize, Clone)]
@@ -59,6 +63,14 @@ impl AppState {
 }
 
 type App<'a> = State<'a, Arc<AppState>>;
+
+/// Payload of the `eq-applied` event, shown as a toast in the UI.
+#[derive(Serialize, Clone)]
+struct EqApplied {
+    name: Option<String>,
+    /// "button" or "restore"
+    source: &'static str,
+}
 
 fn read_headsets(mgr: &HeadsetManager) -> Vec<HeadsetInfo> {
     mgr.with_driver(|d| {
@@ -124,6 +136,30 @@ fn set_button_cycle(app: App<'_>, cycle: Vec<EqSetting>) {
     });
 }
 
+#[tauri::command]
+fn get_synapse_status() -> synapse::SynapseStatus {
+    synapse::status()
+}
+
+#[tauri::command]
+fn stop_synapse() -> Result<synapse::SynapseStatus, String> {
+    synapse::stop()?;
+    Ok(synapse::status())
+}
+
+/// Turns Synapse's own "start with Windows" entry off (saving it) or back on (from the backup).
+#[tauri::command]
+fn set_synapse_autostart(app: App<'_>, enabled: bool) -> Result<synapse::SynapseStatus, String> {
+    if enabled {
+        let backup = app.config.get().synapse_autostart_backup.ok_or("No saved Synapse startup entry to restore")?;
+        synapse::set_autostart(Some(&backup))?;
+    } else if let Some(cmd) = synapse::autostart_command() {
+        app.config.update(|c| c.synapse_autostart_backup = Some(cmd));
+        synapse::set_autostart(None)?;
+    }
+    Ok(synapse::status())
+}
+
 fn profiles_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -170,18 +206,37 @@ fn set_session_mute_state(pids: Vec<u32>, mute: bool) -> Result<(), String> {
     set_session_mute(&pids, mute)
 }
 
-/// Restores the last EQ Frazer applied (the headset doesn't reliably keep it across power cycles).
-fn restore_eq(state: &AppState) {
-    if let Some(eq) = state.config.get().active_eq {
-        match state.apply_eq(&eq) {
-            Ok(()) => eprintln!("restored EQ {:?}", eq.name),
-            Err(e) => eprintln!("restoring EQ failed: {e}"),
+/// Whether the headset is actually running `eq` (fixed slots carry no band data to compare).
+fn eq_matches(s: &Settings, eq: &EqSetting) -> bool {
+    let bands_ok = !matches!(eq.preset, 250..=255) || s.eq_bands.as_deref() == Some(eq.bands.as_slice());
+    s.eq_preset == Some(eq.preset) && s.eq_enabled != Some(false) && bands_ok
+}
+
+/// Restores the last EQ Frazer applied (the headset doesn't keep it across power cycles), then
+/// reads it back after a few seconds and re-applies if the firmware replaced it.
+fn restore_eq(app: &AppHandle, state: &AppState) {
+    let Some(eq) = state.config.get().active_eq else { return };
+    for attempt in 1..=RESTORE_ATTEMPTS {
+        if let Err(e) = state.apply_eq(&eq) {
+            eprintln!("restoring EQ failed (attempt {attempt}): {e}");
+            thread::sleep(RECONNECT_SETTLE);
+            continue;
+        }
+        thread::sleep(RESTORE_VERIFY_DELAY);
+        match state.headsets.with_driver(|d| d.settings()) {
+            Ok(s) if eq_matches(&s, &eq) => {
+                eprintln!("restored EQ {:?} (verified, attempt {attempt})", eq.name);
+                let _ = app.emit("eq-applied", EqApplied { name: eq.name.clone(), source: "restore" });
+                return;
+            }
+            Ok(s) => eprintln!("EQ changed after restore (slot {:?}), re-applying", s.eq_preset),
+            Err(e) => eprintln!("verifying restored EQ failed: {e}"),
         }
     }
 }
 
 /// EQ button pressed: step to the next preset in the user's cycle list.
-fn advance_button_cycle(state: &AppState) -> bool {
+fn advance_button_cycle(app: &AppHandle, state: &AppState) -> bool {
     let next = state.config.update(|c| {
         if c.button_cycle.is_empty() {
             return None;
@@ -192,8 +247,11 @@ fn advance_button_cycle(state: &AppState) -> bool {
     match next {
         Some(eq) => {
             eprintln!("EQ button -> {:?}", eq.name);
-            if let Err(e) = state.apply_eq(&eq) {
-                eprintln!("EQ button apply failed: {e}");
+            match state.apply_eq(&eq) {
+                Ok(()) => {
+                    let _ = app.emit("eq-applied", EqApplied { name: eq.name, source: "button" });
+                }
+                Err(e) => eprintln!("EQ button apply failed: {e}"),
             }
             true
         }
@@ -206,11 +264,11 @@ fn handle_event(app: &AppHandle, state: &AppState, event: HeadsetEvent) {
     match event {
         HeadsetEvent::EqPreset(slot) if state.is_eq_echo(slot) => return,
         HeadsetEvent::EqPreset(_) => {
-            advance_button_cycle(state);
+            advance_button_cycle(app, state);
         }
         HeadsetEvent::HeadsetPower(true) => {
             thread::sleep(RECONNECT_SETTLE);
-            restore_eq(state);
+            restore_eq(app, state);
             let _ = app.emit("device-changed", read_headsets(&state.headsets));
         }
         HeadsetEvent::HeadsetPower(false) | HeadsetEvent::Battery(_) | HeadsetEvent::Charging(_) => {
@@ -226,13 +284,20 @@ fn spawn_device_service(app: AppHandle, state: Arc<AppState>) {
     thread::spawn(move || {
         let mut was_present = None;
         let mut stream = None;
+        let mut synapse_was = None;
         loop {
+            let synapse_now = synapse::status();
+            if synapse_was.as_ref() != Some(&synapse_now) {
+                let _ = app.emit("synapse-changed", synapse_now.clone());
+                synapse_was = Some(synapse_now);
+            }
+
             let present = state.headsets.refresh();
             if was_present != Some(present) {
                 was_present = Some(present);
                 stream = None;
                 if present {
-                    restore_eq(&state);
+                    restore_eq(&app, &state);
                     stream = state.headsets.open_event_stream().inspect_err(|e| eprintln!("event stream: {e}")).ok();
                 }
                 let _ = app.emit("device-changed", if present { read_headsets(&state.headsets) } else { Vec::new() });
@@ -305,6 +370,9 @@ pub fn run() {
             set_headset_auto_off,
             get_app_config,
             set_button_cycle,
+            get_synapse_status,
+            stop_synapse,
+            set_synapse_autostart,
             load_profiles,
             save_profiles,
             list_audio_devices,
@@ -353,4 +421,25 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings(preset: u8, bands: &[i8], enabled: bool) -> Settings {
+        Settings { eq_preset: Some(preset), eq_bands: Some(bands.to_vec()), eq_enabled: Some(enabled), ..Default::default() }
+    }
+
+    #[test]
+    fn restored_eq_must_match_slot_bands_and_be_enabled() {
+        let eq = EqSetting { name: None, preset: 255, bands: vec![1; 10] };
+        assert!(eq_matches(&settings(255, &[1; 10], true), &eq));
+        assert!(!eq_matches(&settings(7, &[1; 10], true), &eq), "firmware switched slot");
+        assert!(!eq_matches(&settings(255, &[0; 10], true), &eq), "bands reset");
+        assert!(!eq_matches(&settings(255, &[1; 10], false), &eq), "hardware EQ off");
+        // Fixed firmware slots have no band data of ours to compare.
+        let game = EqSetting { name: None, preset: 7, bands: vec![3; 10] };
+        assert!(eq_matches(&settings(7, &[0; 10], true), &game));
+    }
 }

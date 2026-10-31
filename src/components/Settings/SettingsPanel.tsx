@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Power, Info, Rocket } from 'lucide-react';
+import { Power, Info, Rocket, ShieldOff } from 'lucide-react';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { useHeadsetStore } from '../../stores/headsetStore';
+import { useSynapseStore } from '../../stores/synapseStore';
 import { Toggle } from '../common/Toggle';
 import { Card, CardTitle, Page } from '../common/Page';
 
@@ -15,6 +16,7 @@ const AUTO_OFF_OPTIONS = [
 
 export const SettingsPanel = () => {
   const { settings, loadSettings, setAutoOff } = useHeadsetStore();
+  const synapse = useSynapseStore();
   const [autostart, setAutostart] = useState(false);
   const [autostartError, setAutostartError] = useState<string | null>(null);
 
@@ -46,6 +48,29 @@ export const SettingsPanel = () => {
           Closing the window keeps Frazer running in the tray. Right-click the tray icon and choose Quit to exit.
         </p>
         {autostartError && <p className="text-xs text-coral mt-2">{autostartError}</p>}
+      </Card>
+
+      <Card>
+        <CardTitle
+          icon={ShieldOff}
+          title="Razer Synapse"
+          hint="Synapse's background engine takes over the EQ button and re-applies its own EQ. Keep it off while using Frazer."
+          right={
+            synapse.status?.running ? (
+              <button onClick={synapse.stop} className="chip chip-active">Close Synapse</button>
+            ) : (
+              <span className="chip chip-idle">Not running</span>
+            )
+          }
+        />
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium">Let Synapse start with Windows</p>
+            <p className="text-xs text-fg-dim mt-0.5">Turning this off removes Synapse's startup entry. Frazer keeps a copy so you can turn it back on.</p>
+          </div>
+          <Toggle checked={!!synapse.status?.autostart} onChange={synapse.setAutostart} label="Let Synapse start with Windows" />
+        </div>
+        {synapse.error && <p className="text-xs text-coral mt-2">{synapse.error}</p>}
       </Card>
 
       {settings && (

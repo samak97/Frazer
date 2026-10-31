@@ -122,6 +122,10 @@ press EQ button --> firmware moves to its next slot --> event 0x13 --> host (Syn
 
 Seen on hardware: pressing the button while on Custom (255) reports slot 7 (Game). Host writes did not produce `0x13` events with the slot the host set.
 
+**After power-on, the firmware reloads its EQ a moment later.** An EQ written ~1 s after `0x20 = 1` was observed to be replaced within the next 3 s. Frazer therefore restores the EQ, reads it back 3 s later, and re-applies it if it changed. In testing, the second attempt held.
+
+**Synapse's background engine** (`RazerAppEngine.exe`, restarted by `RzEngineMon.exe`) keeps listening to these events after you quit Synapse from the tray. While it runs, it handles the EQ button and re-applies its own EQ on reconnect.
+
 Each Windows HID handle gets its own copy of input reports. So Frazer reads events on a second handle, and drains stale reports on the command handle before each command.
 
 ## Not yet confirmed on hardware

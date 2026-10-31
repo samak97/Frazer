@@ -21,6 +21,9 @@ pub struct AppConfig {
     pub button_cycle: Vec<EqSetting>,
     #[serde(default)]
     pub cycle_pos: usize,
+    /// Synapse's original startup command, kept so its autostart can be switched back on.
+    #[serde(default)]
+    pub synapse_autostart_backup: Option<String>,
 }
 
 pub struct ConfigStore {

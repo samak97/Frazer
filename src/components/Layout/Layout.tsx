@@ -1,6 +1,7 @@
 import React from 'react';
 import { Sidebar } from './Sidebar';
 import { TitleBar } from './TitleBar';
+import { EqToasts, SynapseBanner } from './Notices';
 
 export const Layout = ({ children }: { children: React.ReactNode }) => (
   <div className="relative flex flex-col h-screen w-screen bg-ink-950 text-fg overflow-hidden">
@@ -14,8 +15,12 @@ export const Layout = ({ children }: { children: React.ReactNode }) => (
     <div className="relative flex flex-1 min-h-0">
       <Sidebar />
       <main className="flex-1 overflow-y-auto px-8 pt-6">
-        <div className="max-w-6xl mx-auto">{children}</div>
+        <div className="max-w-6xl mx-auto">
+          <SynapseBanner />
+          {children}
+        </div>
       </main>
     </div>
+    <EqToasts />
   </div>
 );
