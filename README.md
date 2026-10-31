@@ -40,17 +40,19 @@ Frazer talks to the headset **directly over USB**, using the same commands Synap
 
 ## Screenshots
 
-| Equalizer | Recommended presets & EQ button |
-|---|---|
-| <img src="docs/screenshots/equalizer.png" alt="Equalizer" /> | <img src="docs/screenshots/presets.png" alt="Presets and EQ button cycle" /> |
-
-| Microphone | Volume mixer |
-|---|---|
-| <img src="docs/screenshots/microphone.png" alt="Microphone" /> | <img src="docs/screenshots/mixer.png" alt="Volume mixer" /> |
-
-| About |
+| Equalizer |
 |---|
-| <img src="docs/screenshots/about.png" alt="About" width="49%" /> |
+| <img src="docs/screenshots/equalizer.png" alt="Equalizer" /> |
+
+| Volume mixer | Recommended presets & EQ button |
+|---|---|
+| <img src="docs/screenshots/mixer.png" alt="Volume mixer" />  | <img src="docs/screenshots/presets.png" alt="Presets and EQ button cycle" /> |
+
+| Microphone | About |
+|---|---|
+| <img src="docs/screenshots/microphone.png" alt="Microphone" /> | <img src="docs/screenshots/about.png" alt="About"/> |
+
+
 
 ## Supported headsets
 
